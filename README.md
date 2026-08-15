@@ -1,31 +1,6 @@
 # Git-Purge (`git-purge-cli`)
 
-> Find and safely clear local git branches that are dead on GitHub.
-
-[![CI](https://github.com/Mayen007/git-purge/actions/workflows/ci.yml/badge.svg)](https://github.com/Mayen007/git-purge/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)](https://nodejs.org)
-
----
-
-## Overview
-
-Over time, local repositories accumulate dozens or hundreds of obsolete feature branches. Standard git tools like `git branch --merged` frequently miss squash-merged branches because GitHub creates a new commit on merge rather than retaining the branch's commit history.
-
-**Git-Purge** queries GitHub's API to inspect the true state of corresponding Pull Requests (handling squash merges, rebase merges, standard merges, and closed PRs) and gives you an interactive, zero-data-loss workflow to clean up dead local branches.
-
----
-
-## Key Features & Safety Guarantees
-
-- **Accurate Merge Detection**: Checks the Pull Request merge state via GitHub API, correctly identifying squash-merged branches that `git branch --merged` misses.
-- **Zero Data Loss Guarantee**:
-  - **Current Branch Guard**: Never deletes the branch you are currently working on.
-  - **Default Branch Guard**: Never deletes the repository's default branch (`main` / `master`), even if reported merged.
-  - **Unpushed Commits Guard**: Skips and warns about any branch containing unpushed local commits.
-  - **Human in the Loop**: Requires human confirmation before any destructive delete action. The `--yes` flag only bypasses per-branch prompts, never the final summary confirmation.
-  - **Ambiguity Protection**: Flags branches with multiple matching PRs as `needs-review` rather than guessing.
-- **Fast & Cached**: Scans are cached locally (`~/.git-purge/<repo>.json`) and respect GitHub API rate limits.
+Git-Purge is a CLI tool that finds and safely clears local git branches that are dead on GitHub. It inspects the true state of corresponding pull requests via GitHub's API (accurately identifying squash merges, rebase merges, and closed PRs that `git branch --merged` misses) and provides an interactive, safe cleanup workflow. Every deletion requires explicit human confirmation with zero risk of accidental data loss.
 
 ---
 
@@ -39,106 +14,109 @@ npm install -g git-purge-cli
 
 ---
 
-## Quick Start
+## Usage
 
-### 1. Configure GitHub Token
+### 1. `config` — Configure GitHub Personal Access Token
 
-Git-Purge requires a GitHub Personal Access Token (PAT) with `repo` read access (or public repo access):
+Store your GitHub Personal Access Token (PAT) with repository read permissions:
 
 ```bash
-git-purge config set-token <your-github-token>
+git-purge config set-token ghp_yourPersonalAccessToken123
 ```
 
-Verify your token configuration:
+Output:
+```
+GitHub personal access token stored successfully.
+```
+
+Check the status of your configured token:
 
 ```bash
 git-purge config get-token
 ```
 
-### 2. Scan Local Branches (`git-purge scan`)
+Output:
+```
+GitHub token is configured: ghp_...c123
+```
 
-Inspect all local branches and match them against GitHub PR status:
+---
+
+### 2. `scan` — Scan and Classify Local Branches
+
+Scan all local branches in the current repository and match them against GitHub pull requests. Scans are read-only and never delete anything.
 
 ```bash
 git-purge scan
 ```
 
-Use the `--refresh` flag to bypass local cache and query GitHub for every branch:
+Real output from running against the test fixture repository:
+
+```
+Git-Purge Branch Scan Report
+============================
+
+BRANCH                   STATUS  PR #  SHA      INFO
+-----------------------  ------  ----  -------  ---------------------------------
+feature/closed-no-merge  closed  #103  2659436  [unpushed work]
+feature/no-pr            no-pr   -     cb3cd04  [unpushed work]
+feature/normal-merge     merged  #101  c916be7  [unpushed work]
+feature/squash-merge     merged  #102  c55cf82  [unpushed work]
+feature/still-open       open    #104  ce213a3  [unpushed work]
+feature/unpushed-work    no-pr   -     60009f5  [unpushed work]
+main                     no-pr   -     498f092  [current, default, unpushed work]
+
+Total: 7 branches scanned (2 merged, 1 closed, 1 open, 3 no-pr, 0 needs-review)
+Eligible for cleanup in 'clean': 3 branch(es)
+```
+
+Use `-r, --refresh` to ignore the local cache and query GitHub fresh for every branch:
 
 ```bash
 git-purge scan --refresh
 ```
 
-### 3. Clean Dead Branches (`git-purge clean`)
+---
 
-Interactively review and delete safe branches (`merged` or `closed`):
+### 3. `clean` — Safely Delete Dead Branches
+
+Interactively delete local branches that have been merged or closed on GitHub.
 
 ```bash
 git-purge clean
 ```
 
-Options:
-- `-y, --yes`: Skip individual branch prompts and proceed directly to the final confirmation step.
-
----
-
-## Branch Status Classifications
-
-| Status | Description | Action |
-| :--- | :--- | :--- |
-| `merged` | Pull request was merged on GitHub (including squash & rebase merges). | Eligible for safe deletion |
-| `closed` | Pull request was closed without merging. | Eligible for review/deletion |
-| `open` | Pull request is currently open on GitHub. | Kept (not offered for deletion) |
-| `no-pr` | No corresponding GitHub pull request found. | Kept |
-| `needs-review` | Ambiguous match (multiple PRs matched) or API failure. | Skipped / flagged for manual review with specific reason |
-
----
-
-## CLI Reference
+Example run output:
 
 ```
-Usage: git-purge [options] [command]
+Found 2 dead branch(es) eligible for deletion:
+  - feature/squash-merge [merged, PR #102]
+  - feature/closed-no-merge [closed, PR #103]
 
-Find and safely clear local git branches that are dead on the remote.
+? Delete branch 'feature/squash-merge'? (y/N) › true
+? Delete branch 'feature/closed-no-merge'? (y/N) › true
+? Ready to delete 2 branch(es). Proceed? (y/N) › true
+
+Clean Summary:
+  ✓ Deleted branch: feature/squash-merge
+  ✓ Deleted branch: feature/closed-no-merge
+
+Successfully deleted 2 branch(es).
+```
 
 Options:
-  -V, --version    output the version number
-  -h, --help       display help for command
-
-Commands:
-  scan [options]   Scan local branches and match against remote GitHub pull requests
-                   Options:
-                     -r, --refresh  Ignore cache and re-check every branch
-  clean [options]  Safely delete local branches that are merged or closed on GitHub
-                   Options:
-                     -y, --yes      Skip individual branch confirmation prompts
-  config           Manage git-purge configuration settings
-                   Subcommands:
-                     set-token <token>  Store GitHub personal access token
-                     get-token          Check configured GitHub token status
-```
+- `-y, --yes`: Skip individual per-branch confirmation prompts and proceed directly to the final summary confirmation.
 
 ---
 
-## Configuration & Cache Storage
+## Safety Guarantees
 
-- **Configuration**: Stored at `~/.git-purge/config.json`
-- **Scan Cache**: Stored per repository at `~/.git-purge/<owner>_<repo>.json` (includes default branch and branch states)
-
----
-
-## Development & Testing
-
-```bash
-# Install dependencies
-npm install
-
-# Run linter
-npm run lint
-
-# Run test suite
-npm test
-```
+- **Mandatory Confirmation**: `clean` **never** deletes any branch without human confirmation. The `--yes` flag only skips per-branch prompts; it never skips the final summary confirmation.
+- **Protected Branches**:
+  - **Default Branch**: The repository's default branch (`main` or `master`) is **never touched**, even if reported merged.
+  - **Current Branch**: The branch you currently have checked out is **never touched**.
+- **Unpushed Commits Guard**: Any branch containing unpushed local commits is automatically skipped and warned about.
+- **Ambiguity Protection**: Ambiguous PR matches or API check failures are marked `needs-review` with specific reasons and are never offered for deletion.
 
 ---
 
