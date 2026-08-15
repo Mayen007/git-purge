@@ -122,7 +122,7 @@ export async function performClean(options = {}) {
         type: "confirm",
         name: "confirmDelete",
         message: `Delete branch '${branch.name}' (${branch.status}${branch.prNumber ? `, PR #${branch.prNumber}` : ""})?`,
-        initial: true,
+        initial: false,
       });
 
       if (response.confirmDelete) {

@@ -283,6 +283,55 @@ describe("clean command and deleter guards", { timeout: 30000 }, () => {
     expect(branches).toContain("feature/squash-merge");
   });
 
+  it("declines delete by default when user presses Enter with no explicit input on per-branch prompt", async () => {
+    const repoKey = "test-owner_test-repo";
+    const localBranches = getLocalBranches(testRepoDir);
+    const squashBranch = localBranches.find((b) => b.name === "feature/squash-merge");
+
+    writeCache(
+      repoKey,
+      {
+        defaultBranch: "main",
+        branches: {
+          "feature/squash-merge": { sha: squashBranch.sha, prNumber: 102, status: "merged", lastCheckedAt: "2026-08-10" },
+        },
+      },
+      testCacheDir
+    );
+
+    let perBranchPromptOptions = null;
+
+    // Simulate user pressing Enter on prompts (returning initial default value)
+    const mockPrompts = async (question) => {
+      if (question.name === "confirmDelete") {
+        perBranchPromptOptions = question;
+        // Pressing Enter accepts the initial default value
+        return { confirmDelete: question.initial };
+      }
+      if (question.name === "proceed") {
+        return { proceed: question.initial };
+      }
+      return {};
+    };
+
+    const result = await performClean({
+      owner: "test-owner",
+      repo: "test-repo",
+      cwd: testRepoDir,
+      cacheDir: testCacheDir,
+      promptHandler: mockPrompts,
+    });
+
+    // Verify per-branch prompt defaulted to false (No)
+    expect(perBranchPromptOptions).not.toBeNull();
+    expect(perBranchPromptOptions.initial).toBe(false);
+
+    // Verify branch was NOT deleted
+    expect(result.deleted).toEqual([]);
+    const branches = getLocalBranches(testRepoDir).map((b) => b.name);
+    expect(branches).toContain("feature/squash-merge");
+  });
+
   it("reads default branch from cache when GitHub API is unreachable", async () => {
     const repoKey = "test-owner_test-repo";
     writeCache(

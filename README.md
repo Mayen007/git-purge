@@ -97,9 +97,9 @@ Found 3 dead branch(es) eligible for deletion:
   - feature/normal-merge [merged, PR #101]
   - feature/squash-merge [merged, PR #102]
 
-? Delete branch 'feature/closed-no-merge' (closed, PR #103)? (Y/n)
-? Delete branch 'feature/normal-merge' (merged, PR #101)? (Y/n)
-? Delete branch 'feature/squash-merge' (merged, PR #102)? (Y/n)
+? Delete branch 'feature/closed-no-merge' (closed, PR #103)? (y/N)
+? Delete branch 'feature/normal-merge' (merged, PR #101)? (y/N)
+? Delete branch 'feature/squash-merge' (merged, PR #102)? (y/N)
 ? Ready to delete 3 branch(es). Proceed? (y/N)
 
 Clean Summary:
