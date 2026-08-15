@@ -142,25 +142,21 @@ describe("clean command and deleter guards", { timeout: 30000 }, () => {
     expect(eligible).toHaveLength(0);
   });
 
-  it("unpushed work guard: skips any branch with unpushed commits and warns", () => {
-    // Add remote tracking branch and push commits
-    execSync("git remote add origin https://github.com/test-owner/test-repo.git", { cwd: testRepoDir });
-    execSync("git update-ref refs/remotes/origin/main main", { cwd: testRepoDir });
-    execSync("git update-ref refs/remotes/origin/feature/squash-merge feature/squash-merge", { cwd: testRepoDir });
-
-    // Make an extra commit on feature/squash-merge that is unpushed
-    execSync("git checkout -q feature/squash-merge", { cwd: testRepoDir });
-    fs.appendFileSync(path.join(testRepoDir, "file.txt"), "extra local unpushed commit\n");
-    execSync('git commit -q -am "extra commit"', { cwd: testRepoDir });
-    execSync("git checkout -q main", { cwd: testRepoDir });
-
-    const localBranches = getLocalBranches(testRepoDir);
-    const squashBranch = localBranches.find((b) => b.name === "feature/squash-merge");
+  it("offers squash-merged branch for deletion when cached SHA matches, ignoring raw git-history check", () => {
+    const localBranches = [
+      { name: "main", sha: "main-sha-000" },
+      { name: "feature/squash-merge", sha: "squash-sha-123" },
+    ];
 
     const mockCache = {
       defaultBranch: "main",
       branches: {
-        "feature/squash-merge": { sha: squashBranch.sha, prNumber: 102, status: "merged", lastCheckedAt: "2026-08-10" },
+        "feature/squash-merge": {
+          sha: "squash-sha-123", // Matching cached SHA
+          prNumber: 102,
+          status: "merged",
+          lastCheckedAt: "2026-08-10",
+        },
       },
     };
 
@@ -172,25 +168,29 @@ describe("clean command and deleter guards", { timeout: 30000 }, () => {
       cwd: testRepoDir,
     });
 
-    expect(eligible).toHaveLength(0);
-    expect(skipped).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          name: "feature/squash-merge",
-          reason: "Has unpushed local commits",
-        }),
-      ])
+    // Despite raw git history not showing squash commits on origin/main, the branch is safely offered
+    expect(eligible).toHaveLength(1);
+    expect(eligible[0]).toEqual(
+      expect.objectContaining({
+        name: "feature/squash-merge",
+        status: "merged",
+        sha: "squash-sha-123",
+      })
     );
+    expect(skipped).toEqual([]);
   });
 
   it("unpushed work guard: skips branch when new local commits were added after scan (SHA mismatch)", () => {
-    const localBranches = getLocalBranches(testRepoDir);
+    const localBranches = [
+      { name: "main", sha: "main-sha-000" },
+      { name: "feature/squash-merge", sha: "new-local-sha-456" }, // Modified locally since scan
+    ];
 
     const mockCache = {
       defaultBranch: "main",
       branches: {
         "feature/squash-merge": {
-          sha: "older_sha_before_new_commit", // Mismatched SHA indicates local changes since scan
+          sha: "old-cached-sha-123", // Mismatched SHA indicates local changes since scan
           prNumber: 102,
           status: "merged",
           lastCheckedAt: "2026-08-10",

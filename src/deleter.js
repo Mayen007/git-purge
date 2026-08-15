@@ -1,4 +1,4 @@
-import { deleteBranch, hasUnpushedCommits } from "./git.js";
+import { deleteBranch } from "./git.js";
 import { readCache, writeCache } from "./cache.js";
 
 /**
@@ -9,7 +9,7 @@ import { readCache, writeCache } from "./cache.js";
  * - Never offer default branch (main/master)
  * - Only offer branches with status 'merged' or 'closed'
  * - Never offer branches with status 'needs-review', 'open', or 'no-pr'
- * - Skip any branch with unpushed commits (and flag with warning)
+ * - Skip any branch with unpushed commits (local SHA modified after scan)
  *
  * @param {Object} params
  * @param {Record<string, { sha: string, prNumber: number | null, status: string, lastCheckedAt: string }> | { defaultBranch?: string | null, branches: Record<string, { sha: string, prNumber: number | null, status: string, lastCheckedAt: string }> }} params.cacheData
@@ -24,7 +24,6 @@ export function filterBranchesForClean({
   localBranches,
   currentBranch,
   defaultBranch,
-  cwd = process.cwd(),
 }) {
   const eligible = [];
   const skipped = [];
@@ -57,8 +56,10 @@ export function filterBranchesForClean({
       continue;
     }
 
-    // Hard safety guard: Skip any branch with unpushed local commits or new local commits since scan
-    if (hasUnpushedCommits(branchName, cwd) || (cached.sha && localBranch.sha !== cached.sha)) {
+    // Safety guard: For merged or closed branches, rely on the SHA match between the cached SHA
+    // and current local SHA. If the local SHA does not match the cached SHA, the branch was modified
+    // locally after the scan/PR status was fetched, so it has unpushed local changes.
+    if (cached.sha && localBranch.sha !== cached.sha) {
       skipped.push({ name: branchName, reason: "Has unpushed local commits" });
       continue;
     }

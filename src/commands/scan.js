@@ -82,7 +82,6 @@ export async function performScan(options = {}) {
   for (const branch of localBranches) {
     const isCurrent = branch.name === currentBranch;
     const isDefault = defaultBranch ? branch.name === defaultBranch : false;
-    const unpushed = hasUnpushedCommits(branch.name, cwd);
 
     const cachedEntry = existingBranches[branch.name];
 
@@ -94,12 +93,16 @@ export async function performScan(options = {}) {
       (cachedEntry.status === "merged" || cachedEntry.status === "closed");
 
     if (canUseCache) {
+      const isNoPr = cachedEntry.status === "no-pr";
+      const unpushed = isNoPr ? hasUnpushedCommits(branch.name, cwd) : false;
+
       matchedBranches.push({
         name: branch.name,
         sha: branch.sha,
         hasUnpushedCommits: unpushed,
         prNumber: cachedEntry.prNumber,
         status: cachedEntry.status,
+        reason: cachedEntry.reason,
         lastCheckedAt: cachedEntry.lastCheckedAt,
         isCurrent,
         isDefault,
@@ -115,6 +118,11 @@ export async function performScan(options = {}) {
 
       const classification = classifyBranch(prs);
       const lastCheckedAt = new Date().toISOString();
+
+      // Only run raw git-history check for branches with status "no-pr",
+      // where there is no PR data from GitHub API to trust instead.
+      const isNoPr = classification.status === "no-pr";
+      const unpushed = isNoPr ? hasUnpushedCommits(branch.name, cwd) : false;
 
       const matched = {
         name: branch.name,
@@ -142,6 +150,9 @@ export async function performScan(options = {}) {
       // Offline fallback: if network failed, try to use cache if available
       if (cachedEntry) {
         console.warn(`Warning: Network call failed for ${branch.name}. Using cached data from ${cachedEntry.lastCheckedAt}.`);
+        const isNoPr = cachedEntry.status === "no-pr";
+        const unpushed = isNoPr ? hasUnpushedCommits(branch.name, cwd) : false;
+
         matchedBranches.push({
           name: branch.name,
           sha: branch.sha,
@@ -156,6 +167,8 @@ export async function performScan(options = {}) {
       } else {
         const errorReason = `API check failed (${apiError.message})`;
         failedBranches.push({ branch: branch.name, error: apiError.message });
+        const unpushed = hasUnpushedCommits(branch.name, cwd);
+
         matchedBranches.push({
           name: branch.name,
           sha: branch.sha,
