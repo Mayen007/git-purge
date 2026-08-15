@@ -57,14 +57,14 @@ Git-Purge Branch Scan Report
 ============================
 
 BRANCH                   STATUS  PR #  SHA      INFO
------------------------  ------  ----  -------  ---------------------------------
-feature/closed-no-merge  closed  #103  2659436  [unpushed work]
-feature/no-pr            no-pr   -     cb3cd04  [unpushed work]
-feature/normal-merge     merged  #101  c916be7  [unpushed work]
-feature/squash-merge     merged  #102  c55cf82  [unpushed work]
-feature/still-open       open    #104  ce213a3  [unpushed work]
-feature/unpushed-work    no-pr   -     60009f5  [unpushed work]
-main                     no-pr   -     498f092  [current, default, unpushed work]
+-----------------------  ------  ----  -------  ------------------
+feature/closed-no-merge  closed  #103  2659436  
+feature/no-pr            no-pr   -     cb3cd04  
+feature/normal-merge     merged  #101  c916be7  
+feature/squash-merge     merged  #102  c55cf82  
+feature/still-open       open    #104  ce213a3  
+feature/unpushed-work    no-pr   -     60009f5  
+main                     no-pr   -     498f092  [current, default]
 
 Total: 7 branches scanned (2 merged, 1 closed, 1 open, 3 no-pr, 0 needs-review)
 Eligible for cleanup in 'clean': 3 branch(es)
@@ -86,22 +86,28 @@ Interactively delete local branches that have been merged or closed on GitHub.
 git-purge clean
 ```
 
-Example run output:
+Real output from running against the test fixture repository:
 
 ```
-Found 2 dead branch(es) eligible for deletion:
-  - feature/squash-merge [merged, PR #102]
-  - feature/closed-no-merge [closed, PR #103]
+Skipped branches:
+  - main (Current active branch)
 
-? Delete branch 'feature/squash-merge'? (y/N) › true
-? Delete branch 'feature/closed-no-merge'? (y/N) › true
-? Ready to delete 2 branch(es). Proceed? (y/N) › true
+Found 3 dead branch(es) eligible for deletion:
+  - feature/closed-no-merge [closed, PR #103]
+  - feature/normal-merge [merged, PR #101]
+  - feature/squash-merge [merged, PR #102]
+
+? Delete branch 'feature/closed-no-merge' (closed, PR #103)? (Y/n)
+? Delete branch 'feature/normal-merge' (merged, PR #101)? (Y/n)
+? Delete branch 'feature/squash-merge' (merged, PR #102)? (Y/n)
+? Ready to delete 3 branch(es). Proceed? (y/N)
 
 Clean Summary:
-  ✓ Deleted branch: feature/squash-merge
   ✓ Deleted branch: feature/closed-no-merge
+  ✓ Deleted branch: feature/normal-merge
+  ✓ Deleted branch: feature/squash-merge
 
-Successfully deleted 2 branch(es).
+Successfully deleted 3 branch(es).
 ```
 
 Options:
@@ -115,7 +121,7 @@ Options:
 - **Protected Branches**:
   - **Default Branch**: The repository's default branch (`main` or `master`) is **never touched**, even if reported merged.
   - **Current Branch**: The branch you currently have checked out is **never touched**.
-- **Unpushed Commits Guard**: Any branch containing unpushed local commits is automatically skipped and warned about.
+- **Unpushed Commits Guard**: Any branch containing unpushed local commits or modified locally since scan is automatically skipped and warned about.
 - **Ambiguity Protection**: Ambiguous PR matches or API check failures are marked `needs-review` with specific reasons and are never offered for deletion.
 
 ---

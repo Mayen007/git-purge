@@ -143,14 +143,26 @@ describe("clean command and deleter guards", { timeout: 30000 }, () => {
   });
 
   it("unpushed work guard: skips any branch with unpushed commits and warns", () => {
+    // Add remote tracking branch and push commits
+    execSync("git remote add origin https://github.com/test-owner/test-repo.git", { cwd: testRepoDir });
+    execSync("git update-ref refs/remotes/origin/main main", { cwd: testRepoDir });
+    execSync("git update-ref refs/remotes/origin/feature/squash-merge feature/squash-merge", { cwd: testRepoDir });
+
+    // Make an extra commit on feature/squash-merge that is unpushed
+    execSync("git checkout -q feature/squash-merge", { cwd: testRepoDir });
+    fs.appendFileSync(path.join(testRepoDir, "file.txt"), "extra local unpushed commit\n");
+    execSync('git commit -q -am "extra commit"', { cwd: testRepoDir });
+    execSync("git checkout -q main", { cwd: testRepoDir });
+
+    const localBranches = getLocalBranches(testRepoDir);
+    const squashBranch = localBranches.find((b) => b.name === "feature/squash-merge");
+
     const mockCache = {
       defaultBranch: "main",
       branches: {
-        "feature/squash-merge": { sha: "333", prNumber: 102, status: "merged", lastCheckedAt: "2026-08-10" },
+        "feature/squash-merge": { sha: squashBranch.sha, prNumber: 102, status: "merged", lastCheckedAt: "2026-08-10" },
       },
     };
-
-    const localBranches = getLocalBranches(testRepoDir);
 
     const { eligible, skipped } = filterBranchesForClean({
       cacheData: mockCache,
@@ -160,7 +172,40 @@ describe("clean command and deleter guards", { timeout: 30000 }, () => {
       cwd: testRepoDir,
     });
 
-    // In isolated repo without upstream remote, feature/squash-merge has unpushed commits
+    expect(eligible).toHaveLength(0);
+    expect(skipped).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "feature/squash-merge",
+          reason: "Has unpushed local commits",
+        }),
+      ])
+    );
+  });
+
+  it("unpushed work guard: skips branch when new local commits were added after scan (SHA mismatch)", () => {
+    const localBranches = getLocalBranches(testRepoDir);
+
+    const mockCache = {
+      defaultBranch: "main",
+      branches: {
+        "feature/squash-merge": {
+          sha: "older_sha_before_new_commit", // Mismatched SHA indicates local changes since scan
+          prNumber: 102,
+          status: "merged",
+          lastCheckedAt: "2026-08-10",
+        },
+      },
+    };
+
+    const { eligible, skipped } = filterBranchesForClean({
+      cacheData: mockCache,
+      localBranches,
+      currentBranch: "main",
+      defaultBranch: "main",
+      cwd: testRepoDir,
+    });
+
     expect(eligible).toHaveLength(0);
     expect(skipped).toEqual(
       expect.arrayContaining([

@@ -57,8 +57,8 @@ export function filterBranchesForClean({
       continue;
     }
 
-    // Hard safety guard: Skip any branch with unpushed local commits
-    if (hasUnpushedCommits(branchName, cwd)) {
+    // Hard safety guard: Skip any branch with unpushed local commits or new local commits since scan
+    if (hasUnpushedCommits(branchName, cwd) || (cached.sha && localBranch.sha !== cached.sha)) {
       skipped.push({ name: branchName, reason: "Has unpushed local commits" });
       continue;
     }

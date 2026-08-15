@@ -52,33 +52,63 @@ export function getLocalBranches(cwd = process.cwd()) {
 
 /**
  * Check if a local branch has unpushed commits.
- * Compares against its upstream tracking branch if configured,
- * or checks for unpushed commits against remote origin.
+ *
+ * Checks:
+ * 1. Upstream tracking branch if configured (branch@{upstream})
+ * 2. Remote tracking ref origin/<branchName> if it exists
+ * 3. If remote is configured but no remote branch exists:
+ *    checks whether commits are already contained in the default remote branch (origin/main).
+ *    If not contained, the branch has unpushed local-only commits.
+ *
  * @param {string} branchName
  * @param {string} [cwd]
  * @returns {boolean}
  */
 export function hasUnpushedCommits(branchName, cwd = process.cwd()) {
   try {
-    // Check if upstream tracking branch is set and compare
+    // 1. Check if upstream tracking branch is set
     const upstream = execGit(`rev-parse --abbrev-ref ${branchName}@{upstream}`, cwd);
     if (upstream) {
       const unpushedCount = execGit(`rev-list --count ${upstream}..${branchName}`, cwd);
       return parseInt(unpushedCount, 10) > 0;
     }
   } catch {
-    // No upstream branch configured for this local branch.
-    // If no upstream is configured, check against remote origin/<branchName> if it exists
-    try {
-      const originRef = `origin/${branchName}`;
-      execGit(`rev-parse --verify ${originRef}`, cwd);
-      const unpushedCount = execGit(`rev-list --count ${originRef}..${branchName}`, cwd);
-      return parseInt(unpushedCount, 10) > 0;
-    } catch {
-      // Branch does not exist on origin at all - all commits are local
+    // No upstream branch configured
+  }
+
+  try {
+    // 2. Check if remote tracking ref origin/<branchName> exists
+    const originRef = `origin/${branchName}`;
+    execGit(`rev-parse --verify ${originRef}`, cwd);
+    const unpushedCount = execGit(`rev-list --count ${originRef}..${branchName}`, cwd);
+    return parseInt(unpushedCount, 10) > 0;
+  } catch {
+    // No origin/<branchName> ref
+  }
+
+  // 3. If remotes exist, check if commits are in the default remote branch
+  try {
+    const remotes = execGit("remote", cwd);
+    if (remotes && remotes.trim().length > 0) {
+      const defaultRemoteBranches = ["origin/main", "origin/master", "origin/HEAD"];
+      for (const ref of defaultRemoteBranches) {
+        try {
+          execGit(`rev-parse --verify ${ref}`, cwd);
+          const count = execGit(`rev-list --count ${ref}..${branchName}`, cwd);
+          if (parseInt(count, 10) === 0) {
+            return false;
+          }
+        } catch {
+          // Ref does not exist, continue
+        }
+      }
+      // Commits not in default remote branch and no branch ref on origin
       return true;
     }
+  } catch {
+    // Ignore
   }
+
   return false;
 }
 
