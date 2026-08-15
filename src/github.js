@@ -7,18 +7,23 @@ const GITHUB_API_BASE = "https://api.github.com";
 
 /**
  * Handle rate limit headers from GitHub API.
- * If remaining requests fall below 50, pause execution until rate limit resets or back off.
+ * If remaining requests fall below 50, pause execution until rate limit resets.
  *
  * @param {Headers} headers
  */
 export async function checkRateLimit(headers) {
+  if (!headers || typeof headers.get !== "function") {
+    return;
+  }
+
   const remainingHeader = headers.get("x-ratelimit-remaining");
   const resetHeader = headers.get("x-ratelimit-reset");
 
   if (remainingHeader !== null) {
     const remaining = parseInt(remainingHeader, 10);
-    if (remaining < 50 && resetHeader !== null) {
-      const resetTime = parseInt(resetHeader, 10) * 1000;
+    if (!isNaN(remaining) && remaining < 50) {
+      const resetSeconds = resetHeader !== null ? parseInt(resetHeader, 10) : NaN;
+      const resetTime = !isNaN(resetSeconds) ? resetSeconds * 1000 : Date.now() + 60000;
       const now = Date.now();
       const waitMs = Math.max(0, resetTime - now + 1000);
       console.warn(`[GitHub API] Rate limit low (${remaining} remaining). Pausing for ${Math.ceil(waitMs / 1000)}s...`);
