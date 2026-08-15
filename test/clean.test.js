@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
@@ -13,6 +13,24 @@ describe("clean command and deleter guards", { timeout: 30000 }, () => {
   let testCacheDir;
 
   beforeEach(() => {
+    // Stub global fetch to prevent any live network requests during clean tests
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url) => {
+        const urlStr = url.toString();
+        if (urlStr.includes("fail-network")) {
+          throw new Error("Network unreachable");
+        }
+        return {
+          ok: true,
+          status: 200,
+          headers: new Headers({ "x-ratelimit-remaining": "4999" }),
+          json: async () => ({ default_branch: "main" }),
+          text: async () => JSON.stringify({ default_branch: "main" }),
+        };
+      })
+    );
+
     // Create an isolated temporary git repo copy to test actual branch deletions safely
     testRepoDir = path.join(os.tmpdir(), `git-purge-clean-repo-${Date.now()}`);
     testCacheDir = path.join(os.tmpdir(), `git-purge-clean-cache-${Date.now()}`);
@@ -48,6 +66,7 @@ describe("clean command and deleter guards", { timeout: 30000 }, () => {
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
     if (fs.existsSync(testRepoDir)) {
       fs.rmSync(testRepoDir, { recursive: true, force: true });
     }
@@ -232,11 +251,18 @@ describe("clean command and deleter guards", { timeout: 30000 }, () => {
       testCacheDir
     );
 
-    // Pass invalid token so API call fails and fallback to cache occurs
+    // Pass fetch stub that fails to simulate unreachable network
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("Network unreachable");
+      })
+    );
+
     const mockPrompts = async () => ({ proceed: false });
 
     const result = await performClean({
-      token: "invalid-token",
+      token: "dummy-token",
       owner: "test-owner",
       repo: "test-repo",
       cwd: testRepoDir,
@@ -244,7 +270,7 @@ describe("clean command and deleter guards", { timeout: 30000 }, () => {
       promptHandler: mockPrompts,
     });
 
-    // Clean ran without crashing, using cached default branch 'production'
+    // Clean ran safely without crashing, reading cached default branch 'production'
     expect(result.deleted).toEqual([]);
   });
 
@@ -261,9 +287,17 @@ describe("clean command and deleter guards", { timeout: 30000 }, () => {
       testCacheDir
     );
 
+    // Network fails
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("Network unreachable");
+      })
+    );
+
     await expect(
       performClean({
-        token: "", // No token available
+        token: "",
         owner: "test-owner",
         repo: "test-repo",
         cwd: testRepoDir,
