@@ -24,18 +24,21 @@ describe("cache module", () => {
     expect(sanitizeRepoKey("owner/repo:test")).toBe("owner_repo_test");
   });
 
-  it("returns empty object if cache file does not exist", () => {
+  it("returns defaultBranch null and empty branches if cache file does not exist", () => {
     const data = readCache("sample-repo", testDir);
-    expect(data).toEqual({});
+    expect(data).toEqual({ defaultBranch: null, branches: {} });
   });
 
-  it("writes and reads branch cache data correctly", () => {
+  it("writes and reads branch cache data and defaultBranch correctly", () => {
     const mockCache = {
-      "feature/login-page": {
-        sha: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
-        prNumber: 142,
-        status: "merged",
-        lastCheckedAt: "2026-08-10T09:00:00Z",
+      defaultBranch: "main",
+      branches: {
+        "feature/login-page": {
+          sha: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+          prNumber: 142,
+          status: "merged",
+          lastCheckedAt: "2026-08-10T09:00:00Z",
+        },
       },
     };
 

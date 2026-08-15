@@ -66,16 +66,17 @@ describe("scan command (MVP)", { timeout: 25000 }, () => {
     expect(statusMap["feature/no-pr"]).toBe("no-pr");
     expect(statusMap["feature/unpushed-work"]).toBe("no-pr");
 
-    // Verify cache file was written to disk with one entry per branch
+    // Verify cache file was written to disk with defaultBranch and branches
     const cacheFile = getCacheFilePath("test-owner_test-repo", testCacheDir);
     expect(fs.existsSync(cacheFile)).toBe(true);
 
     const cacheContent = readCache("test-owner_test-repo", testCacheDir);
-    expect(cacheContent["feature/squash-merge"]).toMatchObject({
+    expect(cacheContent.defaultBranch).toBe("main");
+    expect(cacheContent.branches["feature/squash-merge"]).toMatchObject({
       status: "merged",
       prNumber: 102,
     });
-    expect(cacheContent["feature/still-open"]).toMatchObject({
+    expect(cacheContent.branches["feature/still-open"]).toMatchObject({
       status: "open",
       prNumber: 104,
     });

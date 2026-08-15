@@ -36,6 +36,7 @@ describe("clean command and deleter guards", { timeout: 30000 }, () => {
       "feature/still-open",
       "feature/no-pr",
       "feature/unpushed-work",
+      "feature/ambiguous",
     ];
 
     for (const b of branches) {
@@ -57,13 +58,17 @@ describe("clean command and deleter guards", { timeout: 30000 }, () => {
 
   it("offers only safe merged and closed branches, excluding default, current, open, no-pr, and unpushed", () => {
     const mockCache = {
-      "main": { sha: "111", prNumber: null, status: "merged", lastCheckedAt: "2026-08-10" },
-      "feature/normal-merge": { sha: "222", prNumber: 101, status: "merged", lastCheckedAt: "2026-08-10" },
-      "feature/squash-merge": { sha: "333", prNumber: 102, status: "merged", lastCheckedAt: "2026-08-10" },
-      "feature/closed-no-merge": { sha: "444", prNumber: 103, status: "closed", lastCheckedAt: "2026-08-10" },
-      "feature/still-open": { sha: "555", prNumber: 104, status: "open", lastCheckedAt: "2026-08-10" },
-      "feature/no-pr": { sha: "666", prNumber: null, status: "no-pr", lastCheckedAt: "2026-08-10" },
-      "feature/unpushed-work": { sha: "777", prNumber: null, status: "no-pr", lastCheckedAt: "2026-08-10" },
+      defaultBranch: "main",
+      branches: {
+        "main": { sha: "111", prNumber: null, status: "merged", lastCheckedAt: "2026-08-10" },
+        "feature/normal-merge": { sha: "222", prNumber: 101, status: "merged", lastCheckedAt: "2026-08-10" },
+        "feature/squash-merge": { sha: "333", prNumber: 102, status: "merged", lastCheckedAt: "2026-08-10" },
+        "feature/closed-no-merge": { sha: "444", prNumber: 103, status: "closed", lastCheckedAt: "2026-08-10" },
+        "feature/still-open": { sha: "555", prNumber: 104, status: "open", lastCheckedAt: "2026-08-10" },
+        "feature/no-pr": { sha: "666", prNumber: null, status: "no-pr", lastCheckedAt: "2026-08-10" },
+        "feature/unpushed-work": { sha: "777", prNumber: null, status: "no-pr", lastCheckedAt: "2026-08-10" },
+        "feature/ambiguous": { sha: "888", prNumber: null, status: "needs-review", lastCheckedAt: "2026-08-10" },
+      },
     };
 
     const localBranches = getLocalBranches(testRepoDir);
@@ -84,14 +89,46 @@ describe("clean command and deleter guards", { timeout: 30000 }, () => {
     expect(eligibleNames).not.toContain("main");
     expect(skippedNames).toContain("main");
 
-    // open and no-pr are never offered
+    // open, no-pr, and needs-review are strictly never offered
     expect(eligibleNames).not.toContain("feature/still-open");
     expect(eligibleNames).not.toContain("feature/no-pr");
+    expect(eligibleNames).not.toContain("feature/ambiguous");
+  });
+
+  it("never offers a branch labeled 'needs-review' for deletion", () => {
+    const mockCache = {
+      defaultBranch: "main",
+      branches: {
+        "feature/ambiguous": {
+          sha: "888",
+          prNumber: null,
+          status: "needs-review",
+          lastCheckedAt: "2026-08-10",
+        },
+      },
+    };
+
+    const localBranches = getLocalBranches(testRepoDir);
+
+    const { eligible } = filterBranchesForClean({
+      cacheData: mockCache,
+      localBranches,
+      currentBranch: "main",
+      defaultBranch: "main",
+      cwd: testRepoDir,
+    });
+
+    const eligibleNames = eligible.map((b) => b.name);
+    expect(eligibleNames).not.toContain("feature/ambiguous");
+    expect(eligible).toHaveLength(0);
   });
 
   it("unpushed work guard: skips any branch with unpushed commits and warns", () => {
     const mockCache = {
-      "feature/squash-merge": { sha: "333", prNumber: 102, status: "merged", lastCheckedAt: "2026-08-10" },
+      defaultBranch: "main",
+      branches: {
+        "feature/squash-merge": { sha: "333", prNumber: 102, status: "merged", lastCheckedAt: "2026-08-10" },
+      },
     };
 
     const localBranches = getLocalBranches(testRepoDir);
@@ -119,8 +156,11 @@ describe("clean command and deleter guards", { timeout: 30000 }, () => {
   it("deletes confirmed branches using executeDeletions and updates cache file", () => {
     const repoKey = "test-owner_test-repo";
     const initialCache = {
-      "feature/squash-merge": { sha: "333", prNumber: 102, status: "merged", lastCheckedAt: "2026-08-10" },
-      "feature/still-open": { sha: "555", prNumber: 104, status: "open", lastCheckedAt: "2026-08-10" },
+      defaultBranch: "main",
+      branches: {
+        "feature/squash-merge": { sha: "333", prNumber: 102, status: "merged", lastCheckedAt: "2026-08-10" },
+        "feature/still-open": { sha: "555", prNumber: 104, status: "open", lastCheckedAt: "2026-08-10" },
+      },
     };
     writeCache(repoKey, initialCache, testCacheDir);
 
@@ -141,8 +181,9 @@ describe("clean command and deleter guards", { timeout: 30000 }, () => {
     expect(branchesAfter).not.toContain("feature/squash-merge");
 
     const updatedCache = readCache(repoKey, testCacheDir);
-    expect(updatedCache["feature/squash-merge"]).toBeUndefined();
-    expect(updatedCache["feature/still-open"]).toBeDefined();
+    expect(updatedCache.branches["feature/squash-merge"]).toBeUndefined();
+    expect(updatedCache.branches["feature/still-open"]).toBeDefined();
+    expect(updatedCache.defaultBranch).toBe("main");
   });
 
   it("aborts deletion when user declines final confirmation", async () => {
@@ -150,7 +191,10 @@ describe("clean command and deleter guards", { timeout: 30000 }, () => {
     writeCache(
       repoKey,
       {
-        "feature/squash-merge": { sha: "333", prNumber: 102, status: "merged", lastCheckedAt: "2026-08-10" },
+        defaultBranch: "main",
+        branches: {
+          "feature/squash-merge": { sha: "333", prNumber: 102, status: "merged", lastCheckedAt: "2026-08-10" },
+        },
       },
       testCacheDir
     );
@@ -173,5 +217,60 @@ describe("clean command and deleter guards", { timeout: 30000 }, () => {
     expect(result.deleted).toEqual([]);
     const branches = getLocalBranches(testRepoDir).map((b) => b.name);
     expect(branches).toContain("feature/squash-merge");
+  });
+
+  it("reads default branch from cache when GitHub API is unreachable", async () => {
+    const repoKey = "test-owner_test-repo";
+    writeCache(
+      repoKey,
+      {
+        defaultBranch: "production",
+        branches: {
+          "feature/squash-merge": { sha: "333", prNumber: 102, status: "merged", lastCheckedAt: "2026-08-10" },
+        },
+      },
+      testCacheDir
+    );
+
+    // Pass invalid token so API call fails and fallback to cache occurs
+    const mockPrompts = async () => ({ proceed: false });
+
+    const result = await performClean({
+      token: "invalid-token",
+      owner: "test-owner",
+      repo: "test-repo",
+      cwd: testRepoDir,
+      cacheDir: testCacheDir,
+      promptHandler: mockPrompts,
+    });
+
+    // Clean ran without crashing, using cached default branch 'production'
+    expect(result.deleted).toEqual([]);
+  });
+
+  it("refuses to run clean and throws clear error when neither API nor cache has default branch", async () => {
+    const repoKey = "test-owner_test-repo";
+    writeCache(
+      repoKey,
+      {
+        defaultBranch: null,
+        branches: {
+          "feature/squash-merge": { sha: "333", prNumber: 102, status: "merged", lastCheckedAt: "2026-08-10" },
+        },
+      },
+      testCacheDir
+    );
+
+    await expect(
+      performClean({
+        token: "", // No token available
+        owner: "test-owner",
+        repo: "test-repo",
+        cwd: testRepoDir,
+        cacheDir: testCacheDir,
+      })
+    ).rejects.toThrow(
+      "Could not determine repository default branch from GitHub API or cache. Clean aborted to prevent accidental data loss. Run 'git-purge scan' with a valid token first."
+    );
   });
 });

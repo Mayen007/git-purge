@@ -15,6 +15,8 @@ import { printScanReport } from "../reporter.js";
  * @param {string} [options.cwd]
  * @param {Function} [options.fetcher] - Custom fetcher for testing
  * @param {string} [options.cacheDir] - Custom cache dir for testing
+ * @param {string} [options.defaultBranch]
+ * @param {string} [options.token]
  * @returns {Promise<Array<import("../types.js").MatchedBranch>>}
  */
 export async function performScan(options = {}) {
@@ -39,8 +41,9 @@ export async function performScan(options = {}) {
   }
 
   const repoKey = `${owner}_${repo}`;
-  const cache = readCache(repoKey, options.cacheDir);
-  const updatedCache = { ...cache };
+  const cacheData = readCache(repoKey, options.cacheDir);
+  const existingBranches = cacheData.branches || {};
+  const updatedBranches = { ...existingBranches };
 
   // 3. Detect current and default branch
   let currentBranch = "";
@@ -50,16 +53,19 @@ export async function performScan(options = {}) {
     // Current branch might be detached HEAD
   }
 
-  let defaultBranch = "main";
-  try {
-    if (options.defaultBranch) {
-      defaultBranch = options.defaultBranch;
-    } else {
+  let defaultBranch = options.defaultBranch || null;
+  if (!defaultBranch) {
+    try {
       const repoInfo = await fetchRepoInfo(owner, repo, token);
       defaultBranch = repoInfo.defaultBranch;
+    } catch (err) {
+      if (cacheData.defaultBranch) {
+        defaultBranch = cacheData.defaultBranch;
+        console.warn(`Warning: Could not fetch default branch from GitHub: ${err.message}. Using cached default branch '${defaultBranch}'.`);
+      } else {
+        console.warn(`Warning: Could not fetch default branch from GitHub: ${err.message}.`);
+      }
     }
-  } catch (err) {
-    console.warn(`Warning: Could not fetch default branch from GitHub: ${err.message}. Defaulting to '${defaultBranch}'.`);
   }
 
   // 4. List local branches
@@ -75,10 +81,10 @@ export async function performScan(options = {}) {
   // 5. Match each branch
   for (const branch of localBranches) {
     const isCurrent = branch.name === currentBranch;
-    const isDefault = branch.name === defaultBranch;
+    const isDefault = defaultBranch ? branch.name === defaultBranch : false;
     const unpushed = hasUnpushedCommits(branch.name, cwd);
 
-    const cachedEntry = cache[branch.name];
+    const cachedEntry = existingBranches[branch.name];
 
     // Check if we can reuse cached status (skip API call if already merged/closed and not --refresh)
     const canUseCache =
@@ -124,7 +130,7 @@ export async function performScan(options = {}) {
       matchedBranches.push(matched);
 
       // Update cache
-      updatedCache[branch.name] = {
+      updatedBranches[branch.name] = {
         sha: branch.sha,
         prNumber: classification.prNumber,
         status: classification.status,
@@ -160,8 +166,15 @@ export async function performScan(options = {}) {
     }
   }
 
-  // 6. Write updated cache to file
-  writeCache(repoKey, updatedCache, options.cacheDir);
+  // 6. Write updated cache to file (storing defaultBranch alongside branches)
+  writeCache(
+    repoKey,
+    {
+      defaultBranch: defaultBranch || cacheData.defaultBranch || null,
+      branches: updatedBranches,
+    },
+    options.cacheDir
+  );
 
   // 7. Print formatted report
   printScanReport(matchedBranches);

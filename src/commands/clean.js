@@ -36,22 +36,38 @@ export async function performClean(options = {}) {
 
   const repoKey = `${owner}_${repo}`;
   const cacheData = readCache(repoKey, options.cacheDir);
+  const cachedBranches = cacheData.branches || {};
 
-  if (Object.keys(cacheData).length === 0) {
+  if (Object.keys(cachedBranches).length === 0) {
     console.log("No cached scan results found. Please run 'git-purge scan' first.");
     return { deleted: [], skipped: [], failed: [] };
   }
 
-  // 2. Resolve default branch
-  let defaultBranch = options.defaultBranch || "main";
+  // 2. Resolve default branch:
+  // - Prefer options.defaultBranch if passed
+  // - Try GitHub API if token available
+  // - Fallback to reading defaultBranch from cache
+  // - If neither API nor cache has a default branch value, refuse to run clean (do not guess)
+  let defaultBranch = options.defaultBranch || null;
   const token = options.token !== undefined ? options.token : getToken();
-  if (token && !options.defaultBranch) {
+
+  if (!defaultBranch && token) {
     try {
       const repoInfo = await fetchRepoInfo(owner, repo, token);
       defaultBranch = repoInfo.defaultBranch;
     } catch {
-      // Keep default branch as fallback
+      // API unreachable, will fallback to cache below
     }
+  }
+
+  if (!defaultBranch) {
+    defaultBranch = cacheData.defaultBranch || null;
+  }
+
+  if (!defaultBranch) {
+    throw new Error(
+      "Could not determine repository default branch from GitHub API or cache. Clean aborted to prevent accidental data loss. Run 'git-purge scan' with a valid token first."
+    );
   }
 
   // 3. Resolve current branch and local branches

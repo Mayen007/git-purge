@@ -120,7 +120,7 @@ Definition of done:
 
 ## Cache file
 
-- Path: `~/.git-purge/<repo>.json`
+- Path: `~/.git-purge/<owner>_<repo>.json`
 - One entry per branch: name, SHA, PR number, status, last checked time.
 - Example entry:
 

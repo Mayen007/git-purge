@@ -15,9 +15,9 @@ export function sanitizeRepoKey(repoName) {
 
 /**
  * Returns the path to the cache file for a specific repo.
- * Path format: ~/.git-purge/<repo>.json
+ * Path format: ~/.git-purge/<owner>_<repo>.json
  *
- * @param {string} repoName - e.g. "git-purge" or "owner/repo"
+ * @param {string} repoName - e.g. "owner/repo" or "owner_repo"
  * @param {string} [customDir]
  * @returns {string}
  */
@@ -32,22 +32,36 @@ export function getCacheFilePath(repoName, customDir) {
  *
  * @param {string} repoName
  * @param {string} [customDir]
- * @returns {Record<string, { sha: string, prNumber: number | null, status: import("./types.js").BranchStatus, lastCheckedAt: string }>}
+ * @returns {{ defaultBranch: string | null, branches: Record<string, { sha: string, prNumber: number | null, status: import("./types.js").BranchStatus, lastCheckedAt: string }> }}
  */
 export function readCache(repoName, customDir) {
   const filePath = getCacheFilePath(repoName, customDir);
   try {
     if (!fs.existsSync(filePath)) {
-      return {};
+      return { defaultBranch: null, branches: {} };
     }
     const content = fs.readFileSync(filePath, "utf8");
-    return JSON.parse(content);
+    const parsed = JSON.parse(content);
+    if (parsed && typeof parsed === "object") {
+      if ("branches" in parsed && typeof parsed.branches === "object") {
+        return {
+          defaultBranch: parsed.defaultBranch || null,
+          branches: parsed.branches || {},
+        };
+      }
+      // Support flat format for backwards-compatibility
+      return {
+        defaultBranch: parsed.defaultBranch || null,
+        branches: parsed,
+      };
+    }
+    return { defaultBranch: null, branches: {} };
   } catch (error) {
     if (error.code === "ENOENT") {
-      return {};
+      return { defaultBranch: null, branches: {} };
     }
     console.warn(`Warning: Failed to read cache from ${filePath}: ${error.message}`);
-    return {};
+    return { defaultBranch: null, branches: {} };
   }
 }
 
@@ -55,7 +69,7 @@ export function readCache(repoName, customDir) {
  * Writes the cache file for a repository.
  *
  * @param {string} repoName
- * @param {Record<string, { sha: string, prNumber: number | null, status: import("./types.js").BranchStatus, lastCheckedAt: string }>} cacheData
+ * @param {{ defaultBranch?: string | null, branches: Record<string, { sha: string, prNumber: number | null, status: import("./types.js").BranchStatus, lastCheckedAt: string }> } | Record<string, any>} cacheData
  * @param {string} [customDir]
  */
 export function writeCache(repoName, cacheData, customDir) {
@@ -66,5 +80,16 @@ export function writeCache(repoName, cacheData, customDir) {
     fs.mkdirSync(dir, { recursive: true });
   }
 
-  fs.writeFileSync(filePath, JSON.stringify(cacheData, null, 2), "utf8");
+  const payload =
+    cacheData && typeof cacheData === "object" && "branches" in cacheData
+      ? {
+          defaultBranch: cacheData.defaultBranch || null,
+          branches: cacheData.branches || {},
+        }
+      : {
+          defaultBranch: null,
+          branches: cacheData || {},
+        };
+
+  fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), "utf8");
 }
