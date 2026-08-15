@@ -1,0 +1,8 @@
+{
+  "feature/normal-merge":    { "prNumber": 101, "state": "closed", "merged": true },
+  "feature/squash-merge":    { "prNumber": 102, "state": "closed", "merged": true },
+  "feature/closed-no-merge": { "prNumber": 103, "state": "closed", "merged": false },
+  "feature/still-open":      { "prNumber": 104, "state": "open",   "merged": false },
+  "feature/no-pr": null,
+  "feature/unpushed-work": null
+}
