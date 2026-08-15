@@ -83,6 +83,19 @@ export function hasUnpushedCommits(branchName, cwd = process.cwd()) {
 }
 
 /**
+ * Delete a local branch with `git branch -D`.
+ * @param {string} branchName
+ * @param {string} [cwd]
+ * @returns {string}
+ */
+export function deleteBranch(branchName, cwd = process.cwd()) {
+  if (!branchName || typeof branchName !== "string") {
+    throw new Error("Branch name is required for deletion.");
+  }
+  return execGit(`branch -D "${branchName}"`, cwd);
+}
+
+/**
  * Extract GitHub owner and repo from a git remote URL.
  * Supports HTTPS, SSH, and git:// URL patterns.
  * @param {string} url

@@ -1,0 +1,177 @@
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import path from "node:path";
+import fs from "node:fs";
+import os from "node:os";
+import { execSync } from "node:child_process";
+import { filterBranchesForClean, executeDeletions } from "../src/deleter.js";
+import { performClean } from "../src/commands/clean.js";
+import { writeCache, readCache } from "../src/cache.js";
+import { getLocalBranches } from "../src/git.js";
+
+describe("clean command and deleter guards", { timeout: 30000 }, () => {
+  let testRepoDir;
+  let testCacheDir;
+
+  beforeEach(() => {
+    // Create an isolated temporary git repo copy to test actual branch deletions safely
+    testRepoDir = path.join(os.tmpdir(), `git-purge-clean-repo-${Date.now()}`);
+    testCacheDir = path.join(os.tmpdir(), `git-purge-clean-cache-${Date.now()}`);
+
+    fs.mkdirSync(testRepoDir, { recursive: true });
+    fs.mkdirSync(testCacheDir, { recursive: true });
+
+    // Initialize git repo with test branches
+    execSync("git init -q", { cwd: testRepoDir });
+    execSync('git config user.email "test@example.com"', { cwd: testRepoDir });
+    execSync('git config user.name "Test"', { cwd: testRepoDir });
+    fs.writeFileSync(path.join(testRepoDir, "file.txt"), "init\n");
+    execSync("git add file.txt", { cwd: testRepoDir });
+    execSync('git commit -q -m "init"', { cwd: testRepoDir });
+    execSync("git branch -M main", { cwd: testRepoDir });
+
+    const branches = [
+      "feature/normal-merge",
+      "feature/squash-merge",
+      "feature/closed-no-merge",
+      "feature/still-open",
+      "feature/no-pr",
+      "feature/unpushed-work",
+    ];
+
+    for (const b of branches) {
+      execSync(`git checkout -q -b "${b}"`, { cwd: testRepoDir });
+      fs.appendFileSync(path.join(testRepoDir, "file.txt"), `${b}\n`);
+      execSync(`git commit -q -am "work on ${b}"`, { cwd: testRepoDir });
+      execSync("git checkout -q main", { cwd: testRepoDir });
+    }
+  });
+
+  afterEach(() => {
+    if (fs.existsSync(testRepoDir)) {
+      fs.rmSync(testRepoDir, { recursive: true, force: true });
+    }
+    if (fs.existsSync(testCacheDir)) {
+      fs.rmSync(testCacheDir, { recursive: true, force: true });
+    }
+  });
+
+  it("offers only safe merged and closed branches, excluding default, current, open, no-pr, and unpushed", () => {
+    const mockCache = {
+      "main": { sha: "111", prNumber: null, status: "merged", lastCheckedAt: "2026-08-10" },
+      "feature/normal-merge": { sha: "222", prNumber: 101, status: "merged", lastCheckedAt: "2026-08-10" },
+      "feature/squash-merge": { sha: "333", prNumber: 102, status: "merged", lastCheckedAt: "2026-08-10" },
+      "feature/closed-no-merge": { sha: "444", prNumber: 103, status: "closed", lastCheckedAt: "2026-08-10" },
+      "feature/still-open": { sha: "555", prNumber: 104, status: "open", lastCheckedAt: "2026-08-10" },
+      "feature/no-pr": { sha: "666", prNumber: null, status: "no-pr", lastCheckedAt: "2026-08-10" },
+      "feature/unpushed-work": { sha: "777", prNumber: null, status: "no-pr", lastCheckedAt: "2026-08-10" },
+    };
+
+    const localBranches = getLocalBranches(testRepoDir);
+
+    // Filter branches where test repo has unpushed commits for all local branches (no remote configured)
+    const { eligible, skipped } = filterBranchesForClean({
+      cacheData: mockCache,
+      localBranches,
+      currentBranch: "main",
+      defaultBranch: "main",
+      cwd: testRepoDir,
+    });
+
+    const eligibleNames = eligible.map((b) => b.name);
+    const skippedNames = skipped.map((b) => b.name);
+
+    // main is default & current branch -> never in eligible
+    expect(eligibleNames).not.toContain("main");
+    expect(skippedNames).toContain("main");
+
+    // open and no-pr are never offered
+    expect(eligibleNames).not.toContain("feature/still-open");
+    expect(eligibleNames).not.toContain("feature/no-pr");
+  });
+
+  it("unpushed work guard: skips any branch with unpushed commits and warns", () => {
+    const mockCache = {
+      "feature/squash-merge": { sha: "333", prNumber: 102, status: "merged", lastCheckedAt: "2026-08-10" },
+    };
+
+    const localBranches = getLocalBranches(testRepoDir);
+
+    const { eligible, skipped } = filterBranchesForClean({
+      cacheData: mockCache,
+      localBranches,
+      currentBranch: "main",
+      defaultBranch: "main",
+      cwd: testRepoDir,
+    });
+
+    // In isolated repo without upstream remote, feature/squash-merge has unpushed commits
+    expect(eligible).toHaveLength(0);
+    expect(skipped).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "feature/squash-merge",
+          reason: "Has unpushed local commits",
+        }),
+      ])
+    );
+  });
+
+  it("deletes confirmed branches using executeDeletions and updates cache file", () => {
+    const repoKey = "test-owner_test-repo";
+    const initialCache = {
+      "feature/squash-merge": { sha: "333", prNumber: 102, status: "merged", lastCheckedAt: "2026-08-10" },
+      "feature/still-open": { sha: "555", prNumber: 104, status: "open", lastCheckedAt: "2026-08-10" },
+    };
+    writeCache(repoKey, initialCache, testCacheDir);
+
+    const branchesBefore = getLocalBranches(testRepoDir).map((b) => b.name);
+    expect(branchesBefore).toContain("feature/squash-merge");
+
+    const result = executeDeletions({
+      branchesToDelete: [{ name: "feature/squash-merge" }],
+      repoKey,
+      cacheDir: testCacheDir,
+      cwd: testRepoDir,
+    });
+
+    expect(result.deleted).toEqual(["feature/squash-merge"]);
+    expect(result.failed).toEqual([]);
+
+    const branchesAfter = getLocalBranches(testRepoDir).map((b) => b.name);
+    expect(branchesAfter).not.toContain("feature/squash-merge");
+
+    const updatedCache = readCache(repoKey, testCacheDir);
+    expect(updatedCache["feature/squash-merge"]).toBeUndefined();
+    expect(updatedCache["feature/still-open"]).toBeDefined();
+  });
+
+  it("aborts deletion when user declines final confirmation", async () => {
+    const repoKey = "test-owner_test-repo";
+    writeCache(
+      repoKey,
+      {
+        "feature/squash-merge": { sha: "333", prNumber: 102, status: "merged", lastCheckedAt: "2026-08-10" },
+      },
+      testCacheDir
+    );
+
+    // Mock prompts to decline final confirmation
+    const mockPrompts = async (question) => {
+      if (question.name === "confirmDelete") return { confirmDelete: true };
+      if (question.name === "proceed") return { proceed: false };
+      return {};
+    };
+
+    const result = await performClean({
+      owner: "test-owner",
+      repo: "test-repo",
+      cwd: testRepoDir,
+      cacheDir: testCacheDir,
+      promptHandler: mockPrompts,
+    });
+
+    expect(result.deleted).toEqual([]);
+    const branches = getLocalBranches(testRepoDir).map((b) => b.name);
+    expect(branches).toContain("feature/squash-merge");
+  });
+});
