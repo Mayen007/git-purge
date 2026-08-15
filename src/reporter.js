@@ -28,6 +28,9 @@ export function printScanReport(branches) {
     if (b.isCurrent) details.push("current");
     if (b.isDefault) details.push("default");
     if (b.hasUnpushedCommits) details.push("unpushed work");
+    if (b.status === "needs-review" && b.reason) {
+      details.push(`needs review: ${b.reason}`);
+    }
 
     return {
       branch: b.name,
@@ -67,10 +70,17 @@ export function printScanReport(branches) {
   const closedCount = branches.filter((b) => b.status === "closed").length;
   const openCount = branches.filter((b) => b.status === "open").length;
   const noPrCount = branches.filter((b) => b.status === "no-pr").length;
-  const needsReviewCount = branches.filter((b) => b.status === "needs-review").length;
+  const needsReviewBranches = branches.filter((b) => b.status === "needs-review");
 
   console.log("");
-  console.log(`Total: ${branches.length} branches scanned (${mergedCount} merged, ${closedCount} closed, ${openCount} open, ${noPrCount} no-pr, ${needsReviewCount} needs-review)`);
+  console.log(`Total: ${branches.length} branches scanned (${mergedCount} merged, ${closedCount} closed, ${openCount} open, ${noPrCount} no-pr, ${needsReviewBranches.length} needs-review)`);
   console.log(`Eligible for cleanup in 'clean': ${mergedCount + closedCount} branch(es)`);
+
+  if (needsReviewBranches.length > 0) {
+    console.log("\nBranches requiring manual review:");
+    for (const b of needsReviewBranches) {
+      console.log(`  - ${b.name}: ${b.reason || "ambiguous or unverified state"}`);
+    }
+  }
   console.log("");
 }

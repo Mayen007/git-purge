@@ -64,14 +64,24 @@ describe("classifier module", () => {
     expect(result.prNumber).toBe(42);
   });
 
-  it("flags ambiguous matches (>1 PR) as needs-review without guessing", () => {
+  it("flags ambiguous matches (>1 PR) as needs-review with reason 'multiple PRs matched'", () => {
     const ambiguousResponse = [
       { number: 10, state: "open" },
       { number: 11, state: "closed", merged_at: "2026-08-10T12:00:00Z" },
     ];
     const result = classifyBranch(ambiguousResponse);
     expect(result.status).toBe("needs-review");
+    expect(result.reason).toBe("multiple PRs matched");
     expect(result.prNumber).toBeNull();
+  });
+
+  it("flags unrecognized PR state as needs-review with reason identifying the state", () => {
+    const unrecognizedResponse = [
+      { number: 105, state: "unknown_state" },
+    ];
+    const result = classifyBranch(unrecognizedResponse);
+    expect(result.status).toBe("needs-review");
+    expect(result.reason).toContain("unrecognized PR state: unknown_state");
   });
 
   it("classifies empty array as no-pr", () => {

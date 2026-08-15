@@ -2,3 +2,4 @@ node_modules/
 test/fixtures/repo/
 *.log
 .DS_Store
+HANDOFF.md

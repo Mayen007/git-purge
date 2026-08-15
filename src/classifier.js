@@ -4,7 +4,7 @@ import { BranchStatuses } from "./types.js";
  * Classifies a branch's status based on GitHub PR data.
  *
  * @param {Array<Object> | Object | null} prData - The PR response from GitHub API or fixture mock
- * @returns {{ status: import("./types.js").BranchStatus, prNumber: number | null }}
+ * @returns {{ status: import("./types.js").BranchStatus, prNumber: number | null, reason?: string }}
  */
 export function classifyBranch(prData) {
   // If null, undefined, or empty list -> no PR exists
@@ -23,11 +23,12 @@ export function classifyBranch(prData) {
       };
     }
 
-    // Never guess ambiguous matches: if more than 1 PR result is returned, flag as needs-review
+    // Never guess ambiguous matches: if more than 1 PR result is returned, flag as needs-review with reason
     if (prData.length > 1) {
       return {
         status: BranchStatuses.NEEDS_REVIEW,
         prNumber: null,
+        reason: "multiple PRs matched",
       };
     }
 
@@ -45,7 +46,7 @@ export function classifyBranch(prData) {
  * and test mock format (prNumber, merged, state).
  *
  * @param {Object} pr
- * @returns {{ status: import("./types.js").BranchStatus, prNumber: number | null }}
+ * @returns {{ status: import("./types.js").BranchStatus, prNumber: number | null, reason?: string }}
  */
 function classifySinglePR(pr) {
   const prNumber = pr.number ?? pr.prNumber ?? null;
@@ -75,9 +76,10 @@ function classifySinglePR(pr) {
     };
   }
 
-  // If state is unhandled or unrecognized, mark as needs-review
+  // If state is unhandled or unrecognized, mark as needs-review with reason
   return {
     status: BranchStatuses.NEEDS_REVIEW,
     prNumber,
+    reason: `unrecognized PR state: ${state || "unknown"}`,
   };
 }

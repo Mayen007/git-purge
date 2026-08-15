@@ -122,6 +122,7 @@ export async function performScan(options = {}) {
         hasUnpushedCommits: unpushed,
         prNumber: classification.prNumber,
         status: classification.status,
+        reason: classification.reason,
         lastCheckedAt,
         isCurrent,
         isDefault,
@@ -134,6 +135,7 @@ export async function performScan(options = {}) {
         sha: branch.sha,
         prNumber: classification.prNumber,
         status: classification.status,
+        reason: classification.reason,
         lastCheckedAt,
       };
     } catch (apiError) {
@@ -146,11 +148,13 @@ export async function performScan(options = {}) {
           hasUnpushedCommits: unpushed,
           prNumber: cachedEntry.prNumber,
           status: cachedEntry.status,
+          reason: cachedEntry.reason,
           lastCheckedAt: cachedEntry.lastCheckedAt,
           isCurrent,
           isDefault,
         });
       } else {
+        const errorReason = `API check failed (${apiError.message})`;
         failedBranches.push({ branch: branch.name, error: apiError.message });
         matchedBranches.push({
           name: branch.name,
@@ -158,6 +162,7 @@ export async function performScan(options = {}) {
           hasUnpushedCommits: unpushed,
           prNumber: null,
           status: "needs-review",
+          reason: errorReason,
           lastCheckedAt: new Date().toISOString(),
           isCurrent,
           isDefault,

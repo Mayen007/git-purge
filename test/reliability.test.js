@@ -254,6 +254,7 @@ describe("Phase 3: Reliability & Edge Cases", { timeout: 30000 }, () => {
       const otherBranch = branches.find((b) => b.name === "feature/normal-merge");
 
       expect(failedBranch.status).toBe("needs-review");
+      expect(failedBranch.reason).toContain("API check failed");
       expect(otherBranch.status).toBe("merged");
     });
   });
@@ -303,6 +304,7 @@ describe("Phase 3: Reliability & Edge Cases", { timeout: 30000 }, () => {
 
       const ambiguousBranch = branches.find((b) => b.name === "feature/still-open");
       expect(ambiguousBranch.status).toBe("needs-review");
+      expect(ambiguousBranch.reason).toBe("multiple PRs matched");
       expect(ambiguousBranch.prNumber).toBeNull();
     });
   });

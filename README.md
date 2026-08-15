@@ -90,7 +90,7 @@ Options:
 | `closed` | Pull request was closed without merging. | Eligible for review/deletion |
 | `open` | Pull request is currently open on GitHub. | Kept (not offered for deletion) |
 | `no-pr` | No corresponding GitHub pull request found. | Kept |
-| `needs-review` | Multiple matching PRs or ambiguous match. | Skipped / flagged for manual review |
+| `needs-review` | Ambiguous match (multiple PRs matched) or API failure. | Skipped / flagged for manual review with specific reason |
 
 ---
 
@@ -123,7 +123,7 @@ Commands:
 ## Configuration & Cache Storage
 
 - **Configuration**: Stored at `~/.git-purge/config.json`
-- **Scan Cache**: Stored per repository at `~/.git-purge/<repo>.json`
+- **Scan Cache**: Stored per repository at `~/.git-purge/<owner>_<repo>.json` (includes default branch and branch states)
 
 ---
 

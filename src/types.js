@@ -16,6 +16,7 @@
  * @property {boolean} hasUnpushedCommits
  * @property {number | null} prNumber
  * @property {BranchStatus} status
+ * @property {string} [reason] - Explanatory reason for needs-review status (e.g. "multiple PRs matched", "API check failed")
  * @property {string} lastCheckedAt - ISO date string
  */
 
