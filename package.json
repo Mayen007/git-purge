@@ -1,6 +1,6 @@
 {
   "name": "git-purge-cli",
-  "version": "0.1.5",
+  "version": "0.1.4",
   "description": "Find and safely clear local git branches that are dead on the remote.",
   "repository": {
     "type": "git",
