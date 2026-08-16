@@ -126,6 +126,18 @@ Options:
 
 ---
 
+## Releasing a New Version
+
+*(For maintainers only)*
+
+1. Bump the version in `package.json`.
+2. Commit and push to `main`.
+3. Confirm the new version shows on GitHub before continuing — check `package.json` on the `main` branch in a browser.
+4. Go to the Actions tab, select "Publish to npm," and click "Run workflow."
+5. Do not run `npm publish` locally. The workflow publishes via npm trusted publishing (OIDC) — no token, no login, no browser prompt needed. Running a manual publish at the same time can cause the workflow to fail with a "cannot publish over previous version" error if it loses the race.
+
+---
+
 ## License
 
 [MIT](LICENSE)
