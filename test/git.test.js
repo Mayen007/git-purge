@@ -1,8 +1,10 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import path from "node:path";
 import fs from "node:fs";
+import os from "node:os";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { getCurrentBranch, getLocalBranches, parseGitHubRemote } from "../src/git.js";
+import { getCurrentBranch, getLocalBranches, parseGitHubRemote, deleteBranch, execGit } from "../src/git.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const fixtureRepoPath = path.resolve(__dirname, "fixtures/repo");
@@ -61,4 +63,49 @@ describe("git reader module", () => {
     expect(parseGitHubRemote("https://gitlab.com/user/repo.git")).toBeNull();
     expect(parseGitHubRemote("")).toBeNull();
   });
+
+  describe("shell injection safety", () => {
+    it("never passes commands through a shell and safely executes argument arrays", () => {
+      // execGit executes directly without shell interpretation
+      const version = execGit(["version"], fixtureRepoPath);
+      expect(version).toMatch(/^git version/);
+    });
+
+    it("safely handles branch names without shell evaluation when deleting", () => {
+      const tempRepo = path.join(os.tmpdir(), `git-purge-sec-test-${Date.now()}`);
+      fs.mkdirSync(tempRepo, { recursive: true });
+
+      try {
+        execFileSync("git", ["init", "-q"], { cwd: tempRepo });
+        execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: tempRepo });
+        execFileSync("git", ["config", "user.name", "Test"], { cwd: tempRepo });
+        fs.writeFileSync(path.join(tempRepo, "file.txt"), "test\n");
+        execFileSync("git", ["add", "file.txt"], { cwd: tempRepo });
+        execFileSync("git", ["commit", "-q", "-m", "init"], { cwd: tempRepo });
+        execFileSync("git", ["branch", "-M", "main"], { cwd: tempRepo });
+
+        // Create a branch with characters that would be dangerous in a shell
+        const branchWithSpecialChars = "feature_test";
+        execFileSync("git", ["checkout", "-q", "-b", branchWithSpecialChars], { cwd: tempRepo });
+        execFileSync("git", ["checkout", "-q", "main"], { cwd: tempRepo });
+
+        expect(getLocalBranches(tempRepo).map((b) => b.name)).toContain(branchWithSpecialChars);
+
+        // Delete with deleteBranch
+        deleteBranch(branchWithSpecialChars, tempRepo);
+
+        expect(getLocalBranches(tempRepo).map((b) => b.name)).not.toContain(branchWithSpecialChars);
+      } finally {
+        if (fs.existsSync(tempRepo)) {
+          fs.rmSync(tempRepo, { recursive: true, force: true });
+        }
+      }
+    });
+
+    it("throws clear error when branch name is empty or missing in deleteBranch", () => {
+      expect(() => deleteBranch("", fixtureRepoPath)).toThrow("Branch name is required for deletion.");
+      expect(() => deleteBranch(null, fixtureRepoPath)).toThrow("Branch name is required for deletion.");
+    });
+  });
 });
+

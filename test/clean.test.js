@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { filterBranchesForClean, verifyCandidateBranches, executeDeletions } from "../src/deleter.js";
 import { performClean } from "../src/commands/clean.js";
 import { writeCache, readCache } from "../src/cache.js";
@@ -74,14 +74,14 @@ describe("clean command and deleter guards", { timeout: 30000 }, () => {
     fs.mkdirSync(testRepoDir, { recursive: true });
     fs.mkdirSync(testCacheDir, { recursive: true });
 
-    // Initialize git repo with test branches
-    execSync("git init -q", { cwd: testRepoDir });
-    execSync('git config user.email "test@example.com"', { cwd: testRepoDir });
-    execSync('git config user.name "Test"', { cwd: testRepoDir });
+    // Initialize git repo with test branches using direct execFileSync (no shell)
+    execFileSync("git", ["init", "-q"], { cwd: testRepoDir });
+    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: testRepoDir });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: testRepoDir });
     fs.writeFileSync(path.join(testRepoDir, "file.txt"), "init\n");
-    execSync("git add file.txt", { cwd: testRepoDir });
-    execSync('git commit -q -m "init"', { cwd: testRepoDir });
-    execSync("git branch -M main", { cwd: testRepoDir });
+    execFileSync("git", ["add", "file.txt"], { cwd: testRepoDir });
+    execFileSync("git", ["commit", "-q", "-m", "init"], { cwd: testRepoDir });
+    execFileSync("git", ["branch", "-M", "main"], { cwd: testRepoDir });
 
     const branches = [
       "feature/normal-merge",
@@ -94,10 +94,10 @@ describe("clean command and deleter guards", { timeout: 30000 }, () => {
     ];
 
     for (const b of branches) {
-      execSync(`git checkout -q -b "${b}"`, { cwd: testRepoDir });
+      execFileSync("git", ["checkout", "-q", "-b", b], { cwd: testRepoDir });
       fs.appendFileSync(path.join(testRepoDir, "file.txt"), `${b}\n`);
-      execSync(`git commit -q -am "work on ${b}"`, { cwd: testRepoDir });
-      execSync("git checkout -q main", { cwd: testRepoDir });
+      execFileSync("git", ["commit", "-q", "-am", `work on ${b}`], { cwd: testRepoDir });
+      execFileSync("git", ["checkout", "-q", "main"], { cwd: testRepoDir });
     }
   });
 

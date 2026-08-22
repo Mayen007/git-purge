@@ -1,21 +1,24 @@
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 
 /**
- * Execute a git command synchronously and return the trimmed stdout string.
- * @param {string} command
+ * Execute a git command synchronously using execFileSync (without shell parsing).
+ *
+ * Never constructs a shell command from branch names, repository names, paths, or remote data.
+ *
+ * @param {string[]} args - Array of command-line arguments passed directly to the git executable
  * @param {string} [cwd]
  * @returns {string}
  */
-function execGit(command, cwd = process.cwd()) {
+export function execGit(args, cwd = process.cwd()) {
   try {
-    return execSync(`git ${command}`, {
+    return execFileSync("git", args, {
       cwd,
       encoding: "utf8",
       stdio: ["pipe", "pipe", "pipe"],
     }).trim();
   } catch (error) {
     const stderr = error.stderr ? error.stderr.toString().trim() : "";
-    throw new Error(`Git command failed (${command}): ${stderr || error.message}`);
+    throw new Error(`Git command failed (git ${args.join(" ")}): ${stderr || error.message}`);
   }
 }
 
@@ -26,7 +29,7 @@ function execGit(command, cwd = process.cwd()) {
  * @returns {string}
  */
 export function getCurrentBranch(cwd = process.cwd()) {
-  return execGit("branch --show-current", cwd);
+  return execGit(["branch", "--show-current"], cwd);
 }
 
 /**
@@ -35,7 +38,7 @@ export function getCurrentBranch(cwd = process.cwd()) {
  * @returns {Array<{ name: string, sha: string }>}
  */
 export function getLocalBranches(cwd = process.cwd()) {
-  const output = execGit('for-each-ref --format="%(refname:short)|%(objectname)" refs/heads', cwd);
+  const output = execGit(["for-each-ref", "--format=%(refname:short)|%(objectname)", "refs/heads"], cwd);
   if (!output) {
     return [];
   }
@@ -67,9 +70,9 @@ export function getLocalBranches(cwd = process.cwd()) {
 export function hasUnpushedCommits(branchName, cwd = process.cwd()) {
   try {
     // 1. Check if upstream tracking branch is set
-    const upstream = execGit(`rev-parse --abbrev-ref ${branchName}@{upstream}`, cwd);
+    const upstream = execGit(["rev-parse", "--abbrev-ref", `${branchName}@{upstream}`], cwd);
     if (upstream) {
-      const unpushedCount = execGit(`rev-list --count ${upstream}..${branchName}`, cwd);
+      const unpushedCount = execGit(["rev-list", "--count", `${upstream}..${branchName}`], cwd);
       return parseInt(unpushedCount, 10) > 0;
     }
   } catch {
@@ -79,8 +82,8 @@ export function hasUnpushedCommits(branchName, cwd = process.cwd()) {
   try {
     // 2. Check if remote tracking ref origin/<branchName> exists
     const originRef = `origin/${branchName}`;
-    execGit(`rev-parse --verify ${originRef}`, cwd);
-    const unpushedCount = execGit(`rev-list --count ${originRef}..${branchName}`, cwd);
+    execGit(["rev-parse", "--verify", originRef], cwd);
+    const unpushedCount = execGit(["rev-list", "--count", `${originRef}..${branchName}`], cwd);
     return parseInt(unpushedCount, 10) > 0;
   } catch {
     // No origin/<branchName> ref
@@ -88,13 +91,13 @@ export function hasUnpushedCommits(branchName, cwd = process.cwd()) {
 
   // 3. If remotes exist, check if commits are in the default remote branch
   try {
-    const remotes = execGit("remote", cwd);
+    const remotes = execGit(["remote"], cwd);
     if (remotes && remotes.trim().length > 0) {
       const defaultRemoteBranches = ["origin/main", "origin/master", "origin/HEAD"];
       for (const ref of defaultRemoteBranches) {
         try {
-          execGit(`rev-parse --verify ${ref}`, cwd);
-          const count = execGit(`rev-list --count ${ref}..${branchName}`, cwd);
+          execGit(["rev-parse", "--verify", ref], cwd);
+          const count = execGit(["rev-list", "--count", `${ref}..${branchName}`], cwd);
           if (parseInt(count, 10) === 0) {
             return false;
           }
@@ -113,7 +116,9 @@ export function hasUnpushedCommits(branchName, cwd = process.cwd()) {
 }
 
 /**
- * Delete a local branch with `git branch -D`.
+ * Delete a local branch with `git branch -D -- <branchName>`.
+ * Uses '--' argument delimiter to prevent branch names starting with dashes from being parsed as flags.
+ *
  * @param {string} branchName
  * @param {string} [cwd]
  * @returns {string}
@@ -122,7 +127,7 @@ export function deleteBranch(branchName, cwd = process.cwd()) {
   if (!branchName || typeof branchName !== "string") {
     throw new Error("Branch name is required for deletion.");
   }
-  return execGit(`branch -D "${branchName}"`, cwd);
+  return execGit(["branch", "-D", "--", branchName], cwd);
 }
 
 /**
@@ -160,7 +165,7 @@ export function parseGitHubRemote(url) {
  */
 export function getRemoteOriginUrl(cwd = process.cwd()) {
   try {
-    return execGit("config --get remote.origin.url", cwd);
+    return execGit(["config", "--get", "remote.origin.url"], cwd);
   } catch {
     return null;
   }
@@ -178,3 +183,4 @@ export function detectGitHubRepo(cwd = process.cwd()) {
   }
   return parseGitHubRemote(remoteUrl);
 }
+
