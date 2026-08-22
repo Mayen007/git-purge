@@ -699,6 +699,7 @@ describe("clean command and deleter guards", { timeout: 30000 }, () => {
     const mockPrompts = async () => ({ confirmDelete: true, proceed: true });
 
     const result = await performClean({
+      token: "dummy-token",
       fetcher: mockFetcher,
       owner: "test-owner",
       repo: "test-repo",

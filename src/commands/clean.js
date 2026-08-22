@@ -57,7 +57,9 @@ export async function performClean(options = {}) {
 
   if (!defaultBranch) {
     try {
-      const repoInfo = await fetchRepoInfo(owner, repo, token);
+      const repoInfo = options.fetchRepoInfo
+        ? await options.fetchRepoInfo(owner, repo)
+        : await fetchRepoInfo(owner, repo, token || "mock-token");
       defaultBranch = repoInfo.defaultBranch;
     } catch (err) {
       throw new Error(
