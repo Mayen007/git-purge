@@ -187,13 +187,22 @@ export async function performClean(options = {}) {
     return { deleted: [], skipped: allSkipped, failed: [] };
   }
 
-  // 7. Execute deletions
-  const { deleted, failed } = executeDeletions({
+  // 7. Execute deletions with deletion-boundary SHA check
+  const { deleted, skipped: executionSkipped, failed } = executeDeletions({
     branchesToDelete,
     repoKey,
     cacheDir: options.cacheDir,
     cwd,
   });
+
+  const finalSkipped = [...allSkipped, ...executionSkipped];
+
+  if (executionSkipped.length > 0) {
+    console.log("\nSkipped during deletion execution (safety boundary):");
+    for (const s of executionSkipped) {
+      console.log(`  ⚠ ${s.name} (${s.reason})`);
+    }
+  }
 
   console.log("\nClean Summary:");
   for (const d of deleted) {
@@ -208,7 +217,7 @@ export async function performClean(options = {}) {
 
   console.log(`\nSuccessfully deleted ${deleted.length} branch(es).`);
 
-  return { deleted, skipped: allSkipped, failed };
+  return { deleted, skipped: finalSkipped, failed };
 }
 
 /**

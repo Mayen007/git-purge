@@ -146,6 +146,7 @@ Options:
 ## Safety Guarantees
 
 - **Verification-Driven Deletions**: `clean` performs live PR re-checks on candidate branches right before offering them for deletion to protect against stale cache data and remote status changes.
+- **Deletion Boundary SHA Guard**: Immediately before invoking `git branch -D`, `executeDeletions` re-reads the actual current commit SHA of each local branch from git. If the local SHA changed at any time after live verification or during user confirmation prompts, deletion is immediately aborted for that branch with a warning.
 - **Mandatory Confirmation**: `clean` **never** deletes any branch without human confirmation. The `--yes` flag only skips per-branch prompts; it never skips the final summary confirmation.
 - **Protected Branches**:
   - **Default Branch**: The repository's default branch (`main` or `master`) is **never touched**, even if reported merged.

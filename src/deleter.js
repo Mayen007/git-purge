@@ -1,4 +1,4 @@
-import { deleteBranch } from "./git.js";
+import { deleteBranch, getBranchSha } from "./git.js";
 import { readCache, writeCache } from "./cache.js";
 import { fetchPullRequestsForBranch } from "./github.js";
 import { classifyBranch } from "./classifier.js";
@@ -152,12 +152,17 @@ export async function verifyCandidateBranches({
 /**
  * Executes branch deletions with git branch -D and updates the cache.
  *
+ * Hard safety boundary:
+ * Immediately before calling deleteBranch(), re-reads the actual current local branch SHA.
+ * If the current local SHA does not match the verified SHA (i.e. branch was modified
+ * after live verification or during user confirmation), skips deletion with a clear warning.
+ *
  * @param {Object} params
- * @param {Array<{ name: string }>} params.branchesToDelete
+ * @param {Array<{ name: string, sha?: string }>} params.branchesToDelete
  * @param {string} params.repoKey
  * @param {string} [params.cacheDir]
  * @param {string} [params.cwd]
- * @returns {{ deleted: string[], failed: Array<{ name: string, error: string }> }}
+ * @returns {{ deleted: string[], skipped: Array<{ name: string, reason: string }>, failed: Array<{ name: string, error: string }> }}
  */
 export function executeDeletions({
   branchesToDelete,
@@ -166,12 +171,32 @@ export function executeDeletions({
   cwd = process.cwd(),
 }) {
   const deleted = [];
+  const skipped = [];
   const failed = [];
 
   const cache = readCache(repoKey, cacheDir);
   const branchesObj = cache.branches || {};
 
   for (const branch of branchesToDelete) {
+    // Hard safety boundary: Re-verify actual current local SHA immediately before delete
+    const currentSha = getBranchSha(branch.name, cwd);
+
+    if (!currentSha) {
+      skipped.push({
+        name: branch.name,
+        reason: "Branch no longer exists locally",
+      });
+      continue;
+    }
+
+    if (branch.sha && currentSha !== branch.sha) {
+      skipped.push({
+        name: branch.name,
+        reason: `Branch modified after verification (SHA changed from ${branch.sha.slice(0, 7)} to ${currentSha.slice(0, 7)})`,
+      });
+      continue;
+    }
+
     try {
       deleteBranch(branch.name, cwd);
       deleted.push(branch.name);
@@ -186,6 +211,7 @@ export function executeDeletions({
   cache.branches = branchesObj;
   writeCache(repoKey, cache, cacheDir);
 
-  return { deleted, failed };
+  return { deleted, skipped, failed };
 }
+
 

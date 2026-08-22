@@ -343,10 +343,13 @@ describe("clean command and deleter guards", { timeout: 30000 }, () => {
 
   it("deletes confirmed branches using executeDeletions and updates cache file", () => {
     const repoKey = "test-owner_test-repo";
+    const localBranches = getLocalBranches(testRepoDir);
+    const squashBranch = localBranches.find((b) => b.name === "feature/squash-merge");
+
     const initialCache = {
       defaultBranch: "main",
       branches: {
-        "feature/squash-merge": { sha: "333", prNumber: 102, status: "merged", lastCheckedAt: "2026-08-10" },
+        "feature/squash-merge": { sha: squashBranch.sha, prNumber: 102, status: "merged", lastCheckedAt: "2026-08-10" },
         "feature/still-open": { sha: "555", prNumber: 104, status: "open", lastCheckedAt: "2026-08-10" },
       },
     };
@@ -356,13 +359,14 @@ describe("clean command and deleter guards", { timeout: 30000 }, () => {
     expect(branchesBefore).toContain("feature/squash-merge");
 
     const result = executeDeletions({
-      branchesToDelete: [{ name: "feature/squash-merge" }],
+      branchesToDelete: [{ name: "feature/squash-merge", sha: squashBranch.sha }],
       repoKey,
       cacheDir: testCacheDir,
       cwd: testRepoDir,
     });
 
     expect(result.deleted).toEqual(["feature/squash-merge"]);
+    expect(result.skipped).toEqual([]);
     expect(result.failed).toEqual([]);
 
     const branchesAfter = getLocalBranches(testRepoDir).map((b) => b.name);
@@ -372,6 +376,92 @@ describe("clean command and deleter guards", { timeout: 30000 }, () => {
     expect(updatedCache.branches["feature/squash-merge"]).toBeUndefined();
     expect(updatedCache.branches["feature/still-open"]).toBeDefined();
     expect(updatedCache.defaultBranch).toBe("main");
+  });
+
+  it("executeDeletions hard safety boundary: skips deletion if local branch SHA changed right before deletion", () => {
+    const repoKey = "test-owner_test-repo";
+    const localBranches = getLocalBranches(testRepoDir);
+    const squashBranch = localBranches.find((b) => b.name === "feature/squash-merge");
+
+    const initialCache = {
+      defaultBranch: "main",
+      branches: {
+        "feature/squash-merge": { sha: squashBranch.sha, prNumber: 102, status: "merged", lastCheckedAt: "2026-08-10" },
+      },
+    };
+    writeCache(repoKey, initialCache, testCacheDir);
+
+    // Pass a stale verified SHA that does not match the actual current local SHA
+    const result = executeDeletions({
+      branchesToDelete: [{ name: "feature/squash-merge", sha: "stale-verified-sha-999" }],
+      repoKey,
+      cacheDir: testCacheDir,
+      cwd: testRepoDir,
+    });
+
+    // Deletion boundary guard must refuse to delete the branch
+    expect(result.deleted).toEqual([]);
+    expect(result.skipped).toHaveLength(1);
+    expect(result.skipped[0].reason).toContain("Branch modified after verification");
+
+    const branchesAfter = getLocalBranches(testRepoDir).map((b) => b.name);
+    expect(branchesAfter).toContain("feature/squash-merge");
+  });
+
+  it("performClean end-to-end race protection: preserves branch if modified during prompt after live verification", async () => {
+    const repoKey = "test-owner_test-repo";
+    const localBranches = getLocalBranches(testRepoDir);
+    const squashBranch = localBranches.find((b) => b.name === "feature/squash-merge");
+
+    writeCache(
+      repoKey,
+      {
+        defaultBranch: "main",
+        branches: {
+          "feature/squash-merge": { sha: squashBranch.sha, prNumber: 102, status: "merged", lastCheckedAt: "2026-08-10" },
+        },
+      },
+      testCacheDir
+    );
+
+    // Prompt handler simulates user making a new commit on the branch right while the prompt is open
+    const mockPrompts = async (question) => {
+      if (question.name === "confirmDelete") {
+        // Commit new work onto feature/squash-merge during user interaction
+        execFileSync("git", ["checkout", "-q", "feature/squash-merge"], { cwd: testRepoDir });
+        fs.appendFileSync(path.join(testRepoDir, "file.txt"), "new commit during prompt\n");
+        execFileSync("git", ["commit", "-q", "-am", "new commit during prompt"], { cwd: testRepoDir });
+        execFileSync("git", ["checkout", "-q", "main"], { cwd: testRepoDir });
+        return { confirmDelete: true };
+      }
+      if (question.name === "proceed") {
+        return { proceed: true };
+      }
+      return {};
+    };
+
+    const result = await performClean({
+      token: "dummy-token",
+      owner: "test-owner",
+      repo: "test-repo",
+      cwd: testRepoDir,
+      cacheDir: testCacheDir,
+      promptHandler: mockPrompts,
+    });
+
+    // Must NOT delete the branch because its SHA changed after verification
+    expect(result.deleted).toEqual([]);
+    expect(result.skipped).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "feature/squash-merge",
+          reason: expect.stringContaining("Branch modified after verification"),
+        }),
+      ])
+    );
+
+    const branchesAfter = getLocalBranches(testRepoDir).map((b) => b.name);
+    expect(branchesAfter).toContain("feature/squash-merge");
   });
 
   it("fails with a clear error when no GitHub token is configured for clean", async () => {

@@ -33,6 +33,23 @@ export function getCurrentBranch(cwd = process.cwd()) {
 }
 
 /**
+ * Get the current commit SHA for a local branch ref.
+ * @param {string} branchName
+ * @param {string} [cwd]
+ * @returns {string | null}
+ */
+export function getBranchSha(branchName, cwd = process.cwd()) {
+  if (!branchName || typeof branchName !== "string") {
+    return null;
+  }
+  try {
+    return execGit(["rev-parse", "--verify", `refs/heads/${branchName}`], cwd);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * List all local branches with their latest commit SHA.
  * @param {string} [cwd]
  * @returns {Array<{ name: string, sha: string }>}
