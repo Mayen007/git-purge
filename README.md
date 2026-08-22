@@ -18,8 +18,24 @@ npm install -g git-purge-cli
 
 ### 1. `config` — Configure GitHub Personal Access Token
 
-Store your GitHub Personal Access Token (PAT) with repository read permissions:
+Git-Purge uses GitHub's API to check pull request merge statuses and repository metadata. To authenticate, you will need a GitHub Personal Access Token (PAT).
 
+#### How to get a token:
+1. Visit **[GitHub → Personal access tokens (classic)](https://github.com/settings/tokens/new)**.
+2. Under **Note**, enter a name (e.g., `git-purge-cli`).
+3. Select an expiration period (e.g. 90 days or No expiration).
+4. Select scopes:
+   - For **public repositories only**: check `public_repo`.
+   - For **private & public repositories**: check `repo` (Full control of private repositories).
+5. Click **Generate token** at the bottom and copy the token (starts with `ghp_`).
+
+> [!TIP]
+> **Using Fine-Grained Personal Access Tokens?**
+> You can also create a [Fine-Grained Token](https://github.com/settings/personal-access-tokens/new) with **Repository permissions**:
+> - `Pull requests`: **Read-only**
+> - `Metadata`: **Read-only**
+
+#### Store your token:
 ```bash
 git-purge config set-token ghp_yourPersonalAccessToken123
 ```
@@ -29,8 +45,7 @@ Output:
 GitHub personal access token stored successfully.
 ```
 
-Check the status of your configured token:
-
+#### Check token status:
 ```bash
 git-purge config get-token
 ```
