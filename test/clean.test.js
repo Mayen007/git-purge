@@ -3,7 +3,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import { execSync } from "node:child_process";
-import { filterBranchesForClean, executeDeletions } from "../src/deleter.js";
+import { filterBranchesForClean, verifyCandidateBranches, executeDeletions } from "../src/deleter.js";
 import { performClean } from "../src/commands/clean.js";
 import { writeCache, readCache } from "../src/cache.js";
 import { getLocalBranches } from "../src/git.js";
@@ -13,7 +13,7 @@ describe("clean command and deleter guards", { timeout: 30000 }, () => {
   let testCacheDir;
 
   beforeEach(() => {
-    // Stub global fetch to prevent any live network requests during clean tests
+    // Stub global fetch with default mock handler for clean tests
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url) => {
@@ -21,6 +21,42 @@ describe("clean command and deleter guards", { timeout: 30000 }, () => {
         if (urlStr.includes("fail-network")) {
           throw new Error("Network unreachable");
         }
+
+        // Pull requests query
+        if (urlStr.includes("/pulls")) {
+          if (urlStr.includes("feature%2Fnormal-merge") || urlStr.includes("feature/normal-merge")) {
+            return {
+              ok: true,
+              status: 200,
+              headers: new Headers({ "x-ratelimit-remaining": "4999" }),
+              json: async () => [{ number: 101, state: "closed", merged_at: "2026-08-10" }],
+            };
+          }
+          if (urlStr.includes("feature%2Fsquash-merge") || urlStr.includes("feature/squash-merge")) {
+            return {
+              ok: true,
+              status: 200,
+              headers: new Headers({ "x-ratelimit-remaining": "4999" }),
+              json: async () => [{ number: 102, state: "closed", merged_at: "2026-08-10" }],
+            };
+          }
+          if (urlStr.includes("feature%2Fclosed-no-merge") || urlStr.includes("feature/closed-no-merge")) {
+            return {
+              ok: true,
+              status: 200,
+              headers: new Headers({ "x-ratelimit-remaining": "4999" }),
+              json: async () => [{ number: 103, state: "closed", merged_at: null }],
+            };
+          }
+          return {
+            ok: true,
+            status: 200,
+            headers: new Headers({ "x-ratelimit-remaining": "4999" }),
+            json: async () => [],
+          };
+        }
+
+        // Repo default branch query
         return {
           ok: true,
           status: 200,
@@ -92,7 +128,6 @@ describe("clean command and deleter guards", { timeout: 30000 }, () => {
 
     const localBranches = getLocalBranches(testRepoDir);
 
-    // Filter branches where test repo has unpushed commits for all local branches (no remote configured)
     const { eligible, skipped } = filterBranchesForClean({
       cacheData: mockCache,
       localBranches,
@@ -217,6 +252,95 @@ describe("clean command and deleter guards", { timeout: 30000 }, () => {
     );
   });
 
+  describe("verifyCandidateBranches (Verification-Driven Safety)", () => {
+    it("live-verifies candidate branches against GitHub API and confirms merged/closed ones", async () => {
+      const candidates = [
+        { name: "feature/squash-merge", sha: "111", status: "merged", prNumber: 102 },
+        { name: "feature/closed-no-merge", sha: "222", status: "closed", prNumber: 103 },
+      ];
+
+      const { verifiedEligible, liveSkipped, updatedCacheEntries } = await verifyCandidateBranches({
+        candidates,
+        owner: "test-owner",
+        repo: "test-repo",
+        token: "dummy-token",
+      });
+
+      expect(verifiedEligible).toHaveLength(2);
+      expect(verifiedEligible.map((b) => b.name)).toEqual(["feature/squash-merge", "feature/closed-no-merge"]);
+      expect(liveSkipped).toHaveLength(0);
+      expect(updatedCacheEntries["feature/squash-merge"].status).toBe("merged");
+      expect(updatedCacheEntries["feature/closed-no-merge"].status).toBe("closed");
+    });
+
+    it("safely skips candidate if live verification reveals the PR is now open (status changed since scan)", async () => {
+      const candidates = [
+        { name: "feature/squash-merge", sha: "111", status: "merged", prNumber: 102 },
+      ];
+
+      // Custom fetcher returning open PR
+      const mockFetcher = async () => [{ number: 102, state: "open" }];
+
+      const { verifiedEligible, liveSkipped, updatedCacheEntries } = await verifyCandidateBranches({
+        candidates,
+        owner: "test-owner",
+        repo: "test-repo",
+        fetcher: mockFetcher,
+      });
+
+      expect(verifiedEligible).toHaveLength(0);
+      expect(liveSkipped).toHaveLength(1);
+      expect(liveSkipped[0]).toEqual({
+        name: "feature/squash-merge",
+        reason: "Live check: status is 'open' (PR #102)",
+      });
+      expect(updatedCacheEntries["feature/squash-merge"].status).toBe("open");
+    });
+
+    it("safely skips candidate if live check encounters multiple PRs (needs-review)", async () => {
+      const candidates = [
+        { name: "feature/squash-merge", sha: "111", status: "merged", prNumber: 102 },
+      ];
+
+      const mockFetcher = async () => [
+        { number: 102, state: "closed", merged_at: "2026-08-10" },
+        { number: 105, state: "open" },
+      ];
+
+      const { verifiedEligible, liveSkipped } = await verifyCandidateBranches({
+        candidates,
+        owner: "test-owner",
+        repo: "test-repo",
+        fetcher: mockFetcher,
+      });
+
+      expect(verifiedEligible).toHaveLength(0);
+      expect(liveSkipped).toHaveLength(1);
+      expect(liveSkipped[0].reason).toContain("status is 'needs-review'");
+    });
+
+    it("safely skips candidate if live API check fails (never deletes unverified branch)", async () => {
+      const candidates = [
+        { name: "feature/squash-merge", sha: "111", status: "merged", prNumber: 102 },
+      ];
+
+      const mockFetcher = async () => {
+        throw new Error("503 Service Unavailable");
+      };
+
+      const { verifiedEligible, liveSkipped } = await verifyCandidateBranches({
+        candidates,
+        owner: "test-owner",
+        repo: "test-repo",
+        fetcher: mockFetcher,
+      });
+
+      expect(verifiedEligible).toHaveLength(0);
+      expect(liveSkipped).toHaveLength(1);
+      expect(liveSkipped[0].reason).toContain("Live verification failed (503 Service Unavailable)");
+    });
+  });
+
   it("deletes confirmed branches using executeDeletions and updates cache file", () => {
     const repoKey = "test-owner_test-repo";
     const initialCache = {
@@ -250,7 +374,7 @@ describe("clean command and deleter guards", { timeout: 30000 }, () => {
     expect(updatedCache.defaultBranch).toBe("main");
   });
 
-  it("aborts deletion when user declines final confirmation", async () => {
+  it("fails with a clear error when no GitHub token is configured for clean", async () => {
     const repoKey = "test-owner_test-repo";
     writeCache(
       repoKey,
@@ -258,6 +382,33 @@ describe("clean command and deleter guards", { timeout: 30000 }, () => {
         defaultBranch: "main",
         branches: {
           "feature/squash-merge": { sha: "333", prNumber: 102, status: "merged", lastCheckedAt: "2026-08-10" },
+        },
+      },
+      testCacheDir
+    );
+
+    await expect(
+      performClean({
+        token: "",
+        owner: "test-owner",
+        repo: "test-repo",
+        cwd: testRepoDir,
+        cacheDir: testCacheDir,
+      })
+    ).rejects.toThrow("No GitHub token configured. Please set your token with: git-purge config set-token <token>");
+  });
+
+  it("aborts deletion when user declines final confirmation", async () => {
+    const repoKey = "test-owner_test-repo";
+    const localBranches = getLocalBranches(testRepoDir);
+    const squashBranch = localBranches.find((b) => b.name === "feature/squash-merge");
+
+    writeCache(
+      repoKey,
+      {
+        defaultBranch: "main",
+        branches: {
+          "feature/squash-merge": { sha: squashBranch.sha, prNumber: 102, status: "merged", lastCheckedAt: "2026-08-10" },
         },
       },
       testCacheDir
@@ -271,6 +422,7 @@ describe("clean command and deleter guards", { timeout: 30000 }, () => {
     };
 
     const result = await performClean({
+      token: "dummy-token",
       owner: "test-owner",
       repo: "test-repo",
       cwd: testRepoDir,
@@ -315,6 +467,7 @@ describe("clean command and deleter guards", { timeout: 30000 }, () => {
     };
 
     const result = await performClean({
+      token: "dummy-token",
       owner: "test-owner",
       repo: "test-repo",
       cwd: testRepoDir,
@@ -391,7 +544,7 @@ describe("clean command and deleter guards", { timeout: 30000 }, () => {
 
     await expect(
       performClean({
-        token: "",
+        token: "dummy-token",
         owner: "test-owner",
         repo: "test-repo",
         cwd: testRepoDir,
@@ -401,4 +554,83 @@ describe("clean command and deleter guards", { timeout: 30000 }, () => {
       "Could not determine repository default branch from GitHub API or cache. Clean aborted to prevent accidental data loss. Run 'git-purge scan' with a valid token first."
     );
   });
+
+  it("verification-driven clean: live-verifies candidate branches and deletes confirmed ones", async () => {
+    const repoKey = "test-owner_test-repo";
+    const localBranches = getLocalBranches(testRepoDir);
+    const squashBranch = localBranches.find((b) => b.name === "feature/squash-merge");
+
+    writeCache(
+      repoKey,
+      {
+        defaultBranch: "main",
+        branches: {
+          "feature/squash-merge": { sha: squashBranch.sha, prNumber: 102, status: "merged", lastCheckedAt: "2026-08-10" },
+        },
+      },
+      testCacheDir
+    );
+
+    const mockPrompts = async (question) => {
+      if (question.name === "confirmDelete") return { confirmDelete: true };
+      if (question.name === "proceed") return { proceed: true };
+      return {};
+    };
+
+    const result = await performClean({
+      token: "dummy-token",
+      owner: "test-owner",
+      repo: "test-repo",
+      cwd: testRepoDir,
+      cacheDir: testCacheDir,
+      promptHandler: mockPrompts,
+    });
+
+    expect(result.deleted).toEqual(["feature/squash-merge"]);
+    expect(result.skipped).toEqual([]);
+    const branches = getLocalBranches(testRepoDir).map((b) => b.name);
+    expect(branches).not.toContain("feature/squash-merge");
+  });
+
+  it("verification-driven clean: skips candidate if live verification detects PR was reopened", async () => {
+    const repoKey = "test-owner_test-repo";
+    const localBranches = getLocalBranches(testRepoDir);
+    const squashBranch = localBranches.find((b) => b.name === "feature/squash-merge");
+
+    writeCache(
+      repoKey,
+      {
+        defaultBranch: "main",
+        branches: {
+          "feature/squash-merge": { sha: squashBranch.sha, prNumber: 102, status: "merged", lastCheckedAt: "2026-08-10" },
+        },
+      },
+      testCacheDir
+    );
+
+    // Mock fetcher that reports PR 102 is now open
+    const mockFetcher = async () => [{ number: 102, state: "open" }];
+
+    const mockPrompts = async () => ({ confirmDelete: true, proceed: true });
+
+    const result = await performClean({
+      fetcher: mockFetcher,
+      owner: "test-owner",
+      repo: "test-repo",
+      cwd: testRepoDir,
+      cacheDir: testCacheDir,
+      promptHandler: mockPrompts,
+    });
+
+    // Zero branches deleted because live check caught that the branch PR is open
+    expect(result.deleted).toEqual([]);
+    expect(result.skipped).toHaveLength(1);
+    expect(result.skipped[0]).toEqual({
+      name: "feature/squash-merge",
+      reason: "Live check: status is 'open' (PR #102)",
+    });
+    const branches = getLocalBranches(testRepoDir).map((b) => b.name);
+    expect(branches).toContain("feature/squash-merge");
+  });
 });
+

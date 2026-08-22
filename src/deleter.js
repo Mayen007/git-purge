@@ -1,8 +1,10 @@
 import { deleteBranch } from "./git.js";
 import { readCache, writeCache } from "./cache.js";
+import { fetchPullRequestsForBranch } from "./github.js";
+import { classifyBranch } from "./classifier.js";
 
 /**
- * Filter cached branches to identify branches that are safe to offer for deletion.
+ * Filter cached branches to identify candidate branches that are safe for verification and deletion.
  *
  * Hard safety rules:
  * - Never offer current branch
@@ -64,7 +66,7 @@ export function filterBranchesForClean({
       continue;
     }
 
-    // Branch is safe and eligible for delete confirmation
+    // Branch is a candidate for live verification
     eligible.push({
       name: branchName,
       sha: localBranch.sha,
@@ -74,6 +76,77 @@ export function filterBranchesForClean({
   }
 
   return { eligible, skipped };
+}
+
+/**
+ * Live-verifies candidate branches against GitHub API before deletion.
+ *
+ * For each candidate branch (previously marked merged/closed):
+ * 1. Queries GitHub API for pull requests for the branch.
+ * 2. Classifies the live PR status.
+ * 3. If still 'merged' or 'closed', it is confirmed as eligible for deletion.
+ * 4. If status changed to 'open', 'needs-review', or 'no-pr', skips with clear reason.
+ * 5. If API query fails (network error, rate limit, etc.), skips with clear reason (never delete unverified branches).
+ *
+ * @param {Object} params
+ * @param {Array<{ name: string, sha: string, status: string, prNumber: number | null }>} params.candidates
+ * @param {string} params.owner
+ * @param {string} params.repo
+ * @param {string} [params.token]
+ * @param {Function} [params.fetcher]
+ * @returns {Promise<{ verifiedEligible: Array<{ name: string, sha: string, status: string, prNumber: number | null }>, liveSkipped: Array<{ name: string, reason: string }>, updatedCacheEntries: Record<string, any> }>}
+ */
+export async function verifyCandidateBranches({
+  candidates,
+  owner,
+  repo,
+  token,
+  fetcher,
+}) {
+  const verifiedEligible = [];
+  const liveSkipped = [];
+  const updatedCacheEntries = {};
+
+  for (const candidate of candidates) {
+    try {
+      const prs = fetcher
+        ? await fetcher(candidate.name)
+        : await fetchPullRequestsForBranch(owner, repo, candidate.name, token);
+
+      const classification = classifyBranch(prs);
+      const lastCheckedAt = new Date().toISOString();
+
+      updatedCacheEntries[candidate.name] = {
+        sha: candidate.sha,
+        prNumber: classification.prNumber,
+        status: classification.status,
+        reason: classification.reason,
+        lastCheckedAt,
+      };
+
+      if (classification.status === "merged" || classification.status === "closed") {
+        verifiedEligible.push({
+          name: candidate.name,
+          sha: candidate.sha,
+          status: classification.status,
+          prNumber: classification.prNumber,
+        });
+      } else {
+        const prInfo = classification.prNumber ? ` (PR #${classification.prNumber})` : "";
+        liveSkipped.push({
+          name: candidate.name,
+          reason: `Live check: status is '${classification.status}'${prInfo}`,
+        });
+      }
+    } catch (error) {
+      liveSkipped.push({
+        name: candidate.name,
+        reason: `Live verification failed (${error.message})`,
+      });
+    }
+  }
+
+  return { verifiedEligible, liveSkipped, updatedCacheEntries };
 }
 
 /**
@@ -115,3 +188,4 @@ export function executeDeletions({
 
   return { deleted, failed };
 }
+

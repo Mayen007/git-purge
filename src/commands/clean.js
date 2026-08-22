@@ -2,8 +2,8 @@ import prompts from "prompts";
 import { getToken } from "../config.js";
 import { getCurrentBranch, getLocalBranches, detectGitHubRepo } from "../git.js";
 import { fetchRepoInfo } from "../github.js";
-import { readCache } from "../cache.js";
-import { filterBranchesForClean, executeDeletions } from "../deleter.js";
+import { readCache, writeCache } from "../cache.js";
+import { filterBranchesForClean, verifyCandidateBranches, executeDeletions } from "../deleter.js";
 
 /**
  * Executes the clean command workflow.
@@ -16,6 +16,7 @@ import { filterBranchesForClean, executeDeletions } from "../deleter.js";
  * @param {string} [options.cacheDir]
  * @param {string} [options.token]
  * @param {string} [options.defaultBranch]
+ * @param {Function} [options.fetcher] - Custom fetcher for testing
  * @param {Function} [options.promptHandler] - Custom handler for automated tests
  * @returns {Promise<{ deleted: string[], skipped: Array<{ name: string, reason: string }>, failed: Array<{ name: string, error: string }> }>}
  */
@@ -43,13 +44,18 @@ export async function performClean(options = {}) {
     return { deleted: [], skipped: [], failed: [] };
   }
 
-  // 2. Resolve default branch:
+  // 2. Validate token (required for verification-driven clean, unless mock fetcher is passed)
+  const token = options.token !== undefined ? options.token : getToken();
+  if (!options.fetcher && (!token || typeof token !== "string" || token.trim() === "")) {
+    throw new Error("No GitHub token configured. Please set your token with: git-purge config set-token <token>");
+  }
+
+  // 3. Resolve default branch:
   // - Prefer options.defaultBranch if passed
   // - Try GitHub API if token available
   // - Fallback to reading defaultBranch from cache
   // - If neither API nor cache has a default branch value, refuse to run clean (do not guess)
   let defaultBranch = options.defaultBranch || null;
-  const token = options.token !== undefined ? options.token : getToken();
 
   if (!defaultBranch && token) {
     try {
@@ -70,7 +76,7 @@ export async function performClean(options = {}) {
     );
   }
 
-  // 3. Resolve current branch and local branches
+  // 4. Resolve current branch and local branches
   let currentBranch = "";
   try {
     currentBranch = getCurrentBranch(cwd);
@@ -80,8 +86,8 @@ export async function performClean(options = {}) {
 
   const localBranches = getLocalBranches(cwd);
 
-  // 4. Filter safe branches with hard safety guards
-  const { eligible, skipped } = filterBranchesForClean({
+  // 5. Initial candidate filtering with hard safety guards (default, current, unpushed SHA match)
+  const { eligible: candidateBranches, skipped: initialSkipped } = filterBranchesForClean({
     cacheData,
     localBranches,
     currentBranch,
@@ -89,21 +95,53 @@ export async function performClean(options = {}) {
     cwd,
   });
 
-  // Display warnings for any skipped branches (e.g. unpushed commits)
-  if (skipped.length > 0) {
+  if (candidateBranches.length === 0) {
+    if (initialSkipped.length > 0) {
+      console.log("\nSkipped branches:");
+      for (const item of initialSkipped) {
+        console.log(`  - ${item.name} (${item.reason})`);
+      }
+    }
+    console.log("\nNo dead branches eligible for cleanup.");
+    return { deleted: [], skipped: initialSkipped, failed: [] };
+  }
+
+  // 6. Live verification: Re-check candidate branches against GitHub API to guarantee zero data loss
+  console.log(`\nVerifying ${candidateBranches.length} candidate branch(es) with GitHub API...`);
+  const { verifiedEligible, liveSkipped, updatedCacheEntries } = await verifyCandidateBranches({
+    candidates: candidateBranches,
+    owner,
+    repo,
+    token,
+    fetcher: options.fetcher,
+  });
+
+  // Update cache with freshly verified candidate statuses
+  if (Object.keys(updatedCacheEntries).length > 0) {
+    cacheData.branches = {
+      ...(cacheData.branches || {}),
+      ...updatedCacheEntries,
+    };
+    writeCache(repoKey, cacheData, options.cacheDir);
+  }
+
+  const allSkipped = [...initialSkipped, ...liveSkipped];
+
+  // Display warnings for any skipped branches
+  if (allSkipped.length > 0) {
     console.log("\nSkipped branches:");
-    for (const item of skipped) {
+    for (const item of allSkipped) {
       console.log(`  - ${item.name} (${item.reason})`);
     }
   }
 
-  if (eligible.length === 0) {
+  if (verifiedEligible.length === 0) {
     console.log("\nNo dead branches eligible for cleanup.");
-    return { deleted: [], skipped, failed: [] };
+    return { deleted: [], skipped: allSkipped, failed: [] };
   }
 
-  console.log(`\nFound ${eligible.length} dead branch(es) eligible for deletion:`);
-  for (const b of eligible) {
+  console.log(`\nFound ${verifiedEligible.length} dead branch(es) eligible for deletion:`);
+  for (const b of verifiedEligible) {
     console.log(`  - ${b.name} [${b.status}${b.prNumber ? `, PR #${b.prNumber}` : ""}]`);
   }
   console.log("");
@@ -114,10 +152,10 @@ export async function performClean(options = {}) {
 
   if (options.yes) {
     // --yes flag skips per-branch confirmation
-    branchesToDelete = eligible;
+    branchesToDelete = verifiedEligible;
   } else {
     // Ask confirmation for each branch individually
-    for (const branch of eligible) {
+    for (const branch of verifiedEligible) {
       const response = await promptFn({
         type: "confirm",
         name: "confirmDelete",
@@ -133,7 +171,7 @@ export async function performClean(options = {}) {
 
   if (branchesToDelete.length === 0) {
     console.log("No branches selected for deletion.");
-    return { deleted: [], skipped, failed: [] };
+    return { deleted: [], skipped: allSkipped, failed: [] };
   }
 
   // Hard safety rule: Never run a delete step without final summary confirmation prompt
@@ -146,10 +184,10 @@ export async function performClean(options = {}) {
 
   if (!finalConfirmation.proceed) {
     console.log("Deletion aborted by user. Zero branches deleted.");
-    return { deleted: [], skipped, failed: [] };
+    return { deleted: [], skipped: allSkipped, failed: [] };
   }
 
-  // 5. Execute deletions
+  // 7. Execute deletions
   const { deleted, failed } = executeDeletions({
     branchesToDelete,
     repoKey,
@@ -170,7 +208,7 @@ export async function performClean(options = {}) {
 
   console.log(`\nSuccessfully deleted ${deleted.length} branch(es).`);
 
-  return { deleted, skipped, failed };
+  return { deleted, skipped: allSkipped, failed };
 }
 
 /**
@@ -191,3 +229,4 @@ export function registerCleanCommand(program) {
       }
     });
 }
+

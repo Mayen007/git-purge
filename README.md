@@ -105,6 +105,8 @@ git-purge scan --refresh
 
 Run this **inside any local git repository** to interactively delete local branches that have been merged or closed on GitHub.
 
+While `scan` is cache-driven for fast discovery across large repositories, `clean` is **verification-driven**: it re-verifies candidate branches live against GitHub's API before prompting for deletion, ensuring zero data loss even if remote PR statuses changed since your last scan. Because it only re-checks candidate branches (and not the entire repository), verification remains blazing fast.
+
 ```bash
 git-purge clean
 ```
@@ -112,6 +114,8 @@ git-purge clean
 Real output from running against the test fixture repository:
 
 ```
+Verifying 3 candidate branch(es) with GitHub API...
+
 Skipped branches:
   - main (Current active branch)
 
@@ -141,12 +145,13 @@ Options:
 
 ## Safety Guarantees
 
+- **Verification-Driven Deletions**: `clean` performs live PR re-checks on candidate branches right before offering them for deletion to protect against stale cache data and remote status changes.
 - **Mandatory Confirmation**: `clean` **never** deletes any branch without human confirmation. The `--yes` flag only skips per-branch prompts; it never skips the final summary confirmation.
 - **Protected Branches**:
   - **Default Branch**: The repository's default branch (`main` or `master`) is **never touched**, even if reported merged.
   - **Current Branch**: The branch you currently have checked out is **never touched**.
 - **Unpushed Commits Guard**: Any branch containing unpushed local commits or modified locally since scan is automatically skipped and warned about.
-- **Ambiguity Protection**: Ambiguous PR matches or API check failures are marked `needs-review` with specific reasons and are never offered for deletion.
+- **Ambiguity & Failure Protection**: Ambiguous PR matches or API check failures are marked `needs-review` / skipped with specific reasons and are never offered for deletion.
 
 ---
 
