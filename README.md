@@ -10,7 +10,7 @@ Git-Purge is a CLI tool that finds and safely clears local git branches that are
 npm install -g git-purge-cli
 ```
 
-*Requirements: Node.js 20 LTS or newer.*
+_Requirements: Node.js 20 LTS or newer._
 
 ---
 
@@ -21,6 +21,7 @@ npm install -g git-purge-cli
 Git-Purge uses GitHub's API to check pull request merge statuses and repository metadata. To authenticate, you will need a GitHub Personal Access Token (PAT).
 
 #### How to get a token:
+
 1. Visit **[GitHub → Personal access tokens (classic)](https://github.com/settings/tokens/new)**.
 2. Under **Note**, enter a name (e.g., `git-purge-cli`).
 3. Select an expiration period (e.g. 90 days or No expiration).
@@ -32,25 +33,32 @@ Git-Purge uses GitHub's API to check pull request merge statuses and repository 
 > [!TIP]
 > **Using Fine-Grained Personal Access Tokens?**
 > You can also create a [Fine-Grained Token](https://github.com/settings/personal-access-tokens/new) with **Repository permissions**:
+>
 > - `Pull requests`: **Read-only**
 > - `Metadata`: **Read-only**
 
 #### Store your token:
+
+Run this **once from any terminal window**. The token is saved globally on your machine at `~/.git-purge/config.json` and will be used across all your local repositories (it is stored outside of git and is never committed or tracked):
+
 ```bash
 git-purge config set-token ghp_yourPersonalAccessToken123
 ```
 
 Output:
+
 ```
 GitHub personal access token stored successfully.
 ```
 
 #### Check token status:
+
 ```bash
 git-purge config get-token
 ```
 
 Output:
+
 ```
 GitHub token is configured: ghp_...c123
 ```
@@ -59,7 +67,7 @@ GitHub token is configured: ghp_...c123
 
 ### 2. `scan` — Scan and Classify Local Branches
 
-Scan all local branches in the current repository and match them against GitHub pull requests. Scans are read-only and never delete anything.
+Run this **inside any local git repository** to scan all local branches and match them against GitHub pull requests. Scans are read-only and never delete anything.
 
 ```bash
 git-purge scan
@@ -73,12 +81,12 @@ Git-Purge Branch Scan Report
 
 BRANCH                   STATUS  PR #  SHA      INFO
 -----------------------  ------  ----  -------  ------------------
-feature/closed-no-merge  closed  #103  2659436  
-feature/no-pr            no-pr   -     cb3cd04  
-feature/normal-merge     merged  #101  c916be7  
-feature/squash-merge     merged  #102  c55cf82  
-feature/still-open       open    #104  ce213a3  
-feature/unpushed-work    no-pr   -     60009f5  
+feature/closed-no-merge  closed  #103  2659436
+feature/no-pr            no-pr   -     cb3cd04
+feature/normal-merge     merged  #101  c916be7
+feature/squash-merge     merged  #102  c55cf82
+feature/still-open       open    #104  ce213a3
+feature/unpushed-work    no-pr   -     60009f5
 main                     no-pr   -     498f092  [current, default]
 
 Total: 7 branches scanned (2 merged, 1 closed, 1 open, 3 no-pr, 0 needs-review)
@@ -95,7 +103,7 @@ git-purge scan --refresh
 
 ### 3. `clean` — Safely Delete Dead Branches
 
-Interactively delete local branches that have been merged or closed on GitHub.
+Run this **inside any local git repository** to interactively delete local branches that have been merged or closed on GitHub.
 
 ```bash
 git-purge clean
@@ -126,6 +134,7 @@ Successfully deleted 3 branch(es).
 ```
 
 Options:
+
 - `-y, --yes`: Skip individual per-branch confirmation prompts and proceed directly to the final summary confirmation.
 
 ---
@@ -143,7 +152,7 @@ Options:
 
 ## Releasing a New Version
 
-*(For maintainers only)*
+_(For maintainers only)_
 
 1. Run: `npm version patch` (or `minor` / `major` for bigger changes). This bumps the version in `package.json`, commits it, and creates a correctly-placed git tag automatically — no manual editing of `package.json` needed.
 2. Run: `git push --follow-tags` (pushes both the commit and the new tag together).
