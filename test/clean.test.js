@@ -575,7 +575,7 @@ describe("clean command and deleter guards", { timeout: 30000 }, () => {
     expect(branches).toContain("feature/squash-merge");
   });
 
-  it("reads default branch from cache when GitHub API is unreachable", async () => {
+  it("aborts clean and throws clear error when GitHub API repository verification fails", async () => {
     const repoKey = "test-owner_test-repo";
     writeCache(
       repoKey,
@@ -596,42 +596,6 @@ describe("clean command and deleter guards", { timeout: 30000 }, () => {
       })
     );
 
-    const mockPrompts = async () => ({ proceed: false });
-
-    const result = await performClean({
-      token: "dummy-token",
-      owner: "test-owner",
-      repo: "test-repo",
-      cwd: testRepoDir,
-      cacheDir: testCacheDir,
-      promptHandler: mockPrompts,
-    });
-
-    // Clean ran safely without crashing, reading cached default branch 'production'
-    expect(result.deleted).toEqual([]);
-  });
-
-  it("refuses to run clean and throws clear error when neither API nor cache has default branch", async () => {
-    const repoKey = "test-owner_test-repo";
-    writeCache(
-      repoKey,
-      {
-        defaultBranch: null,
-        branches: {
-          "feature/squash-merge": { sha: "333", prNumber: 102, status: "merged", lastCheckedAt: "2026-08-10" },
-        },
-      },
-      testCacheDir
-    );
-
-    // Network fails
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => {
-        throw new Error("Network unreachable");
-      })
-    );
-
     await expect(
       performClean({
         token: "dummy-token",
@@ -641,8 +605,39 @@ describe("clean command and deleter guards", { timeout: 30000 }, () => {
         cacheDir: testCacheDir,
       })
     ).rejects.toThrow(
-      "Could not determine repository default branch from GitHub API or cache. Clean aborted to prevent accidental data loss. Run 'git-purge scan' with a valid token first."
+      "Could not verify repository default branch from GitHub API: Network unreachable. Clean aborted to prevent accidental data loss."
     );
+  });
+
+  it("uses options.defaultBranch when explicitly provided without querying repo info", async () => {
+    const repoKey = "test-owner_test-repo";
+    const localBranches = getLocalBranches(testRepoDir);
+    const squashBranch = localBranches.find((b) => b.name === "feature/squash-merge");
+
+    writeCache(
+      repoKey,
+      {
+        defaultBranch: "main",
+        branches: {
+          "feature/squash-merge": { sha: squashBranch.sha, prNumber: 102, status: "merged", lastCheckedAt: "2026-08-10" },
+        },
+      },
+      testCacheDir
+    );
+
+    const mockPrompts = async () => ({ proceed: false });
+
+    const result = await performClean({
+      defaultBranch: "main",
+      token: "dummy-token",
+      owner: "test-owner",
+      repo: "test-repo",
+      cwd: testRepoDir,
+      cacheDir: testCacheDir,
+      promptHandler: mockPrompts,
+    });
+
+    expect(result.deleted).toEqual([]);
   });
 
   it("verification-driven clean: live-verifies candidate branches and deletes confirmed ones", async () => {

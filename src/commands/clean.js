@@ -50,29 +50,25 @@ export async function performClean(options = {}) {
     throw new Error("No GitHub token configured. Please set your token with: git-purge config set-token <token>");
   }
 
-  // 3. Resolve default branch:
-  // - Prefer options.defaultBranch if passed
-  // - Try GitHub API if token available
-  // - Fallback to reading defaultBranch from cache
-  // - If neither API nor cache has a default branch value, refuse to run clean (do not guess)
+  // 3. Live repository verification: resolve default branch from GitHub API
+  // In verification-driven clean, we strictly verify the default branch live with GitHub API
+  // and abort if live verification fails (never fall back to stale cached default branch).
   let defaultBranch = options.defaultBranch || null;
 
-  if (!defaultBranch && token) {
+  if (!defaultBranch) {
     try {
       const repoInfo = await fetchRepoInfo(owner, repo, token);
       defaultBranch = repoInfo.defaultBranch;
-    } catch {
-      // API unreachable, will fallback to cache below
+    } catch (err) {
+      throw new Error(
+        `Could not verify repository default branch from GitHub API: ${err.message}. Clean aborted to prevent accidental data loss.`
+      );
     }
   }
 
   if (!defaultBranch) {
-    defaultBranch = cacheData.defaultBranch || null;
-  }
-
-  if (!defaultBranch) {
     throw new Error(
-      "Could not determine repository default branch from GitHub API or cache. Clean aborted to prevent accidental data loss. Run 'git-purge scan' with a valid token first."
+      "Repository default branch could not be determined from GitHub API. Clean aborted to prevent accidental data loss."
     );
   }
 
